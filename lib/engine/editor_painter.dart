@@ -1,4 +1,3 @@
-// lib/engine/editor_painter.dart
 import 'package:flutter/material.dart';
 import 'dart:ui' as ui;
 import 'dart:math' as math;
@@ -123,15 +122,17 @@ class EditorPainter extends CustomPainter {
           final boxes = textPainter.getBoxesForSelection(
             TextSelection(baseOffset: leftIndex, extentOffset: leftIndex + 1),
           );
-          if (boxes.isNotEmpty && (boxes.last.top - cursorTop).abs() < 5.0)
+          if (boxes.isNotEmpty && (boxes.last.top - cursorTop).abs() < 5.0) {
             validBox = boxes.last.toRect();
+          }
         }
         if (validBox == null && rightIndex < plainTextLength) {
           final boxes = textPainter.getBoxesForSelection(
             TextSelection(baseOffset: rightIndex, extentOffset: rightIndex + 1),
           );
-          if (boxes.isNotEmpty && (boxes.first.top - cursorTop).abs() < 5.0)
+          if (boxes.isNotEmpty && (boxes.first.top - cursorTop).abs() < 5.0) {
             validBox = boxes.first.toRect();
+          }
         }
 
         if (validBox != null) {
@@ -194,8 +195,6 @@ class EditorPainter extends CustomPainter {
           contentHeightForThisPage,
         );
 
-        // 🌟 KİLİT ÇÖZÜM: Kırpma alanını 30 piksel şişiriyoruz (inflate).
-        // Böylece metin alt kenara yapışsa bile damlacıklar kesilmiyor!
         canvas.clipRect(printableRect.inflate(30.0));
         canvas.translate(
           layout.marginLeft,

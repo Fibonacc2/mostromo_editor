@@ -4,8 +4,8 @@ import 'package:provider/provider.dart';
 import '../../core/app_theme.dart';
 import '../../engine/block_engine/mostromo_block.dart';
 import '../../providers/block_editor_provider.dart';
-import '../../providers/editor_provider.dart'; // Eski klasik motorumuzun kalbi
-import '../../engine/mostromo_editor.dart'; // Klasik motorun ekran çizicisi
+import '../../providers/editor_provider.dart';
+import '../../engine/mostromo_editor.dart';
 
 class BlockWidget extends StatefulWidget {
   final MostromoBlock block;
@@ -17,14 +17,12 @@ class BlockWidget extends StatefulWidget {
 class _BlockWidgetState extends State<BlockWidget> {
   bool _isHovered = false;
 
-  // 1. YEREL PERFORMANS DEĞİŞKENLERİ (Kasmayı engeller)
   double _localX = 0;
   double _localY = 0;
   double _localW = 300;
   double _localH = 150;
   bool _isDraggingOrResizing = false;
 
-  // 2. HER BİR BLOĞA ÖZEL ZENGİN METİN MOTORU (Mini Mostromo Belgesi)
   EditorProvider? _localEditorProvider;
 
   @override
@@ -32,7 +30,6 @@ class _BlockWidgetState extends State<BlockWidget> {
     super.initState();
     _syncGeometryFromBlock();
 
-    // Eğer bu bir metin bloğuysa, içine kendi klasik motorumuzu (PieceTable) yerleştiriyoruz!
     if (widget.block.type == BlockType.paragraph ||
         widget.block.type == BlockType.heading1 ||
         widget.block.type == BlockType.heading2 ||
@@ -44,13 +41,14 @@ class _BlockWidgetState extends State<BlockWidget> {
         _localEditorProvider!.initialize(mroData);
       } else {
         _localEditorProvider!.initialize('');
-        // Seçilen türe göre başlangıç fontunu ayarla
-        if (widget.block.type == BlockType.heading1)
+
+        if (widget.block.type == BlockType.heading1) {
           _localEditorProvider!.applyFontSize(32);
-        else if (widget.block.type == BlockType.heading2)
+        } else if (widget.block.type == BlockType.heading2) {
           _localEditorProvider!.applyFontSize(24);
-        else if (widget.block.type == BlockType.heading3)
+        } else if (widget.block.type == BlockType.heading3) {
           _localEditorProvider!.applyFontSize(20);
+        }
       }
 
       _localEditorProvider!.addListener(_onLocalEditorChanged);
@@ -67,7 +65,6 @@ class _BlockWidgetState extends State<BlockWidget> {
   @override
   void didUpdateWidget(BlockWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Sadece sürükleme işlemi yoksa dışarıdan gelen (diskteki) veriyi al
     if (!_isDraggingOrResizing) {
       _syncGeometryFromBlock();
     }
@@ -76,11 +73,10 @@ class _BlockWidgetState extends State<BlockWidget> {
   void _onLocalEditorChanged() {
     if (_localEditorProvider != null && _localEditorProvider!.isDirty) {
       final mroJson = _localEditorProvider!.generateMroData();
-      // İçerideki metin motorunda harf bile değişse anında dış bloğa (mroData olarak) kaydeder
       context.read<BlockEditorProvider>().updateBlockData(widget.block.id, {
         'mroData': jsonEncode(mroJson),
       });
-      _localEditorProvider!.markAsSaved(); // Sonsuz döngüyü engeller
+      _localEditorProvider!.markAsSaved();
     }
   }
 
@@ -96,7 +92,6 @@ class _BlockWidgetState extends State<BlockWidget> {
     final provider = context.watch<BlockEditorProvider>();
     final isFocused = provider.focusedBlockId == widget.block.id;
 
-    // Kendini dışarıdaki Canvas'a (Stack) göre konumlandırır
     return Positioned(
       left: _localX,
       top: _localY,
@@ -122,7 +117,6 @@ class _BlockWidgetState extends State<BlockWidget> {
             ),
             child: Stack(
               children: [
-                // --- 1. İÇERİK (KLASİK METİN MOTORU VEYA GRAFİK) ---
                 Positioned.fill(
                   child: Padding(
                     padding: const EdgeInsets.only(
@@ -130,12 +124,11 @@ class _BlockWidgetState extends State<BlockWidget> {
                       left: 8,
                       right: 8,
                       bottom: 8,
-                    ), // Tutamaç için üstten boşluk
+                    ),
                     child: _buildBlockContent(context, isFocused),
                   ),
                 ),
 
-                // --- 2. SÜRÜKLEME TEPESİ (Hızlı ve Akıcı) ---
                 if (_isHovered || isFocused)
                   Positioned(
                     top: 0,
@@ -151,7 +144,6 @@ class _BlockWidgetState extends State<BlockWidget> {
                         },
                         onPanUpdate: (details) {
                           setState(() {
-                            // YENİ: Sınırların (Canvas) dışına çıkmasını engelleyen matematik (.clamp)
                             _localX = (_localX + details.delta.dx).clamp(
                               0.0,
                               provider.pageWidth - _localW,
@@ -185,7 +177,6 @@ class _BlockWidgetState extends State<BlockWidget> {
                     ),
                   ),
 
-                // --- 3. YENİDEN BOYUTLANDIRMA KÖŞESİ ---
                 if (_isHovered || isFocused)
                   Positioned(
                     bottom: 0,
@@ -199,7 +190,6 @@ class _BlockWidgetState extends State<BlockWidget> {
                         },
                         onPanUpdate: (details) {
                           setState(() {
-                            // YENİ: Büyürken sayfa sınırlarını aşmasını engelle
                             _localW = (_localW + details.delta.dx).clamp(
                               100.0,
                               provider.pageWidth - _localX,
@@ -246,12 +236,10 @@ class _BlockWidgetState extends State<BlockWidget> {
     );
   }
 
-  // DÜZELTİLDİ: İçeriye isFocused bilgisini gönderiyoruz
   Widget _buildBlockContent(BuildContext context, bool isFocused) {
     if (_localEditorProvider != null) {
       return ChangeNotifierProvider.value(
         value: _localEditorProvider!,
-        // SİHİRLİ BAĞLANTI: Klasik motora aktif olup olmadığını bildiriyoruz
         child: MostromoEditorWidget(isActive: isFocused),
       );
     } else if (widget.block.type == BlockType.divider) {

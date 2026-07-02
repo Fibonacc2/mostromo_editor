@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:provider/provider.dart'; // 🌟 YENİ EKLENDİ
+import 'package:provider/provider.dart';
 
 import '../../core/app_theme.dart';
-import '../../core/auth_view_model.dart'; // 🌟 YENİ EKLENDİ
+import '../../core/auth_view_model.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -31,9 +31,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
   }
 
-  // 🌟 ÇIKIŞ YAPMA MOTORU (PROVIDER İLE GÜNCELLENDİ)
   Future<void> _logout() async {
-    // 1. Emin misin sorusu (Opsiyonel ama şık durur)
     final bool? confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -73,10 +71,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (confirm != true) return;
 
     if (mounted) {
-      // 2. Uygulamanın RAM'indeki beynini (Provider) ve Diski sıfırla
       await context.read<AuthViewModel>().logout();
 
-      // 3. Login ekranına şutla (Artık geri tuşuyla panele dönemez)
+      // 🌟 GÜVENLİK AĞI EKLENDİ (Asenkron işlemden döndüğümüzde sayfa hâlâ hayatta mı?)
+      if (!mounted) {
+        return;
+      }
+
       context.go('/login');
     }
   }
@@ -90,7 +91,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            // --- ÜST BİLGİ ÇUBUĞU ---
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
               child: Row(
@@ -133,7 +133,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              // --- KULLANICI BİLGİ KARTI ---
                               const Text(
                                 "HESAP BİLGİLERİ",
                                 style: TextStyle(
@@ -201,7 +200,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
                               const SizedBox(height: 32),
 
-                              // --- ÇIKIŞ YAP BUTONU ---
                               SizedBox(
                                 width: double.infinity,
                                 child: ElevatedButton.icon(

@@ -41,9 +41,6 @@ class MostromoTitleBar extends StatelessWidget {
 
     Widget topBar;
 
-    // ==========================================
-    // 📱 MOBİL ARAYÜZ
-    // ==========================================
     if (!isDesktopOS) {
       topBar = SafeArea(
         bottom: false,
@@ -61,14 +58,13 @@ class MostromoTitleBar extends StatelessWidget {
                 onPressed: onClose,
               ),
               const Spacer(),
-              // 🌟 DÜZELTME 1: Başlık artık mobilde de değiştirilebilir bir TextField!
               if (titleController != null)
                 Expanded(
                   flex: 4,
                   child: TextField(
                     controller: titleController,
                     textAlign: TextAlign.center,
-                    readOnly: isExternal, // Sadece okunur moddaysa kilitler
+                    readOnly: isExternal,
                     cursorColor: MostromoTheme.accentColor,
                     style: TextStyle(
                       color: isExternal ? Colors.white54 : Colors.white,
@@ -91,11 +87,7 @@ class MostromoTitleBar extends StatelessWidget {
           ),
         ),
       );
-    }
-    // ==========================================
-    // 🖥️ MASAÜSTÜ ARAYÜZÜ
-    // ==========================================
-    else {
+    } else {
       topBar = Container(
         height: height,
         color: backgroundColor ?? MostromoTheme.backgroundColor,
@@ -215,10 +207,11 @@ class MostromoTitleBar extends StatelessWidget {
               () => windowManager.minimize(),
             ),
             _buildWindowButton(Icons.crop_square_rounded, () async {
-              if (await windowManager.isMaximized())
+              if (await windowManager.isMaximized()) {
                 windowManager.unmaximize();
-              else
+              } else {
                 windowManager.maximize();
+              }
             }),
             _buildWindowButton(Icons.close_rounded, onClose, isClose: true),
           ],
@@ -233,8 +226,6 @@ class MostromoTitleBar extends StatelessWidget {
       children: [topBar, _buildProtectedViewBanner(isMobile)],
     );
   }
-
-  // --- YARDIMCI WIDGET'LAR ---
 
   Widget _buildDynamicSaveIcon() {
     if (isBlockMode) {

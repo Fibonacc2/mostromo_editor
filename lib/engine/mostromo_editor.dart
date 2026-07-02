@@ -1,4 +1,3 @@
-// lib/engine/mostromo_editor.dart
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -8,7 +7,6 @@ import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show kIsWeb;
 
 import '../providers/editor_provider.dart';
-import '../core/app_theme.dart';
 import 'page_layout.dart';
 import 'editor_painter.dart';
 
@@ -49,7 +47,9 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
     super.initState();
     _focusNode = FocusNode(
       onKeyEvent: (node, event) {
-        if (!mounted) return KeyEventResult.ignored;
+        if (!mounted) {
+          return KeyEventResult.ignored;
+        }
         bool handled = _handleKeyEvent(event, context.read<EditorProvider>());
         return handled ? KeyEventResult.handled : KeyEventResult.ignored;
       },
@@ -60,11 +60,15 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
         _startBlinking();
       } else {
         _cursorTimer?.cancel();
-        if (mounted) setState(() => _showCursor = false);
+        if (mounted) {
+          setState(() => _showCursor = false);
+        }
       }
     });
 
-    if (widget.isActive) _startBlinking();
+    if (widget.isActive) {
+      _startBlinking();
+    }
   }
 
   @override
@@ -96,7 +100,9 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
   }
 
   void _onImeChanged(String value, EditorProvider provider) {
-    if (_isImeUpdating) return;
+    if (_isImeUpdating) {
+      return;
+    }
 
     if (value.startsWith(_previousImeText)) {
       String added = value.substring(_previousImeText.length);
@@ -124,14 +130,11 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
     _startBlinking();
   }
 
-  // 🌟 DÜZELTME: Menü artık seçimin 45 piksel ALTINDA açılıyor
   void _showContextMenu(
     BuildContext context,
     Offset globalPosition,
     EditorProvider provider,
   ) async {
-    final RenderBox overlay =
-        Overlay.of(context).context.findRenderObject() as RenderBox;
     double menuY = globalPosition.dy + 45;
 
     final value = await showMenu<String>(
@@ -257,7 +260,9 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
   }
 
   bool _handleKeyEvent(KeyEvent event, EditorProvider provider) {
-    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return false;
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return false;
+    }
 
     final logicalKey = event.logicalKey;
     final character = event.character;
@@ -324,10 +329,14 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
       int newCursor = provider.cursorIndex;
 
       if (logicalKey == LogicalKeyboardKey.arrowLeft) {
-        if (newCursor > 0) newCursor--;
+        if (newCursor > 0) {
+          newCursor--;
+        }
         _intendedCursorX = null;
       } else if (logicalKey == LogicalKeyboardKey.arrowRight) {
-        if (newCursor < provider.engine.getText().length) newCursor++;
+        if (newCursor < provider.engine.getText().length) {
+          newCursor++;
+        }
         _intendedCursorX = null;
       } else {
         newCursor = _calculateVerticalMove(
@@ -389,7 +398,10 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
     double printableWidth = provider.isPageMode
         ? maxWidth - mLeft - mRight
         : maxWidth - 64;
-    if (printableWidth < 100) printableWidth = 100;
+
+    if (printableWidth < 100) {
+      printableWidth = 100;
+    }
 
     return TextPainter(text: textSpan, textDirection: TextDirection.ltr)
       ..layout(minWidth: 0, maxWidth: printableWidth);
@@ -423,7 +435,9 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
     }
 
     double printableHeight = a4Height - mTop - mBottom;
-    if (printableHeight < 100) printableHeight = 100;
+    if (printableHeight < 100) {
+      printableHeight = 100;
+    }
 
     List<double> breaks = [0.0];
     double currentSubHeight = 0.0;
@@ -455,7 +469,10 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
   }
 
   int _calculateVerticalMove(EditorProvider provider, bool isUp) {
-    if (_cachedTextPainter == null) return provider.cursorIndex;
+    if (_cachedTextPainter == null) {
+      return provider.cursorIndex;
+    }
+
     int len = provider.engine.getText().length;
     final textPainter = _cachedTextPainter!;
 
@@ -469,7 +486,10 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
 
     _intendedCursorX ??= currentOffset.dx;
     final metrics = textPainter.computeLineMetrics();
-    if (metrics.isEmpty) return isUp ? 0 : len;
+
+    if (metrics.isEmpty) {
+      return isUp ? 0 : len;
+    }
 
     double accumulatedY = 0;
     int currentLineIdx = metrics.length - 1;
@@ -486,8 +506,13 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
     }
 
     int targetLine = isUp ? currentLineIdx - 1 : currentLineIdx + 1;
-    if (targetLine < 0) return provider.cursorIndex;
-    if (targetLine >= metrics.length) return provider.cursorIndex;
+
+    if (targetLine < 0) {
+      return provider.cursorIndex;
+    }
+    if (targetLine >= metrics.length) {
+      return provider.cursorIndex;
+    }
 
     double targetY = lineCenters[targetLine];
     final newPosition = textPainter.getPositionForOffset(
@@ -497,8 +522,9 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
   }
 
   int _getOffsetIndex(Offset localPosition, EditorProvider provider) {
-    if (_cachedTextPainter == null || _cachedLayout == null)
+    if (_cachedTextPainter == null || _cachedLayout == null) {
       return provider.cursorIndex;
+    }
 
     double logicalY = _cachedLayout!.physicalToLogicalY(localPosition.dy);
     double logicalX =
@@ -516,7 +542,6 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
     final provider = context.watch<EditorProvider>();
     final bool isMobile = !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 
-    // 🌟 DÜZELTME: Mobilde devasa A4 boşluklarını kırpıp ekrana sığdırıyoruz
     final double mLeft = isMobile && provider.isPageMode
         ? 16.0
         : provider.marginLeft;
@@ -532,7 +557,6 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
 
     Widget editorContent = LayoutBuilder(
       builder: (context, constraints) {
-        // 🌟 DÜZELTME: A4 modu mobilde ekran dışına taşmasın diye `constraints.maxWidth` kullanılıyor
         _currentMaxWidth = provider.isPageMode
             ? (isMobile ? constraints.maxWidth : 800.0)
             : constraints.maxWidth;
@@ -647,7 +671,9 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
                     }
                   },
                   onTapUp: (details) {
-                    if (_currentDragHandle != DragHandle.none) return;
+                    if (_currentDragHandle != DragHandle.none) {
+                      return;
+                    }
 
                     int idx = _getOffsetIndex(details.localPosition, provider);
 

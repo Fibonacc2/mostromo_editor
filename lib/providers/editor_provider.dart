@@ -6,21 +6,19 @@ import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:file_picker/file_picker.dart';
 import 'dart:math' as math;
-import 'dart:async'; // 🌟 YENİ: Timer (Debounce) için
+import 'dart:async';
 
 import '../engine/piece_table.dart';
 import '../engine/piece.dart';
-import '../core/sync_utils.dart'; // 🌟 YENİ: Hash Kalkanı için
+import '../core/sync_utils.dart';
 
 class EditorProvider extends ChangeNotifier {
   PieceTable engine = PieceTable(initialText: '');
 
-  // 🌟 YENİ: SENKRONİZASYON VE HASH DEĞİŞKENLERİ
   String _documentTitle = '';
-  String _initialHash = ''; // Dosya açıldığındaki parmak izi
-  Timer? _autoSaveTimer; // 2 saniyelik geri sayım sayacı
+  String _initialHash = '';
+  Timer? _autoSaveTimer;
 
-  // Dışarıdan yakalamak için bir Callback (Local Storage'a haber verecek)
   Function(String title, String mroData)? onLocalSaveTriggered;
 
   bool get canUndo => engine.canUndo();
@@ -44,7 +42,7 @@ class EditorProvider extends ChangeNotifier {
   int cursorIndex = 0;
   int? selectionBase;
 
-  String get documentTitle => _documentTitle; // 🌟 YENİ
+  String get documentTitle => _documentTitle;
   bool get isBold => _isBold;
   bool get isItalic => _isItalic;
   bool get isUnderline => _isUnderline;
@@ -58,24 +56,20 @@ class EditorProvider extends ChangeNotifier {
   bool get hasSelection =>
       selectionBase != null && selectionBase != cursorIndex;
 
-  // 🌟 YENİ: BAŞLIK GÜNCELLEME MOTORU
   void updateTitle(String newTitle) {
     if (_documentTitle != newTitle) {
       _documentTitle = newTitle;
-      setDirty(); // Başlık değişirse de otomatik kaydetmeyi tetikle
+      setDirty();
     }
   }
 
-  // 🌟 YENİ: ANLIK PARMAK İZİ HESAPLAYICI
   String _calculateCurrentHash() {
     return SyncUtils.generateHash(_documentTitle, engine.getText());
   }
 
-  // 🌟 YENİ: AKILLI KAYDETME MOTORU (DEBOUNCE KONTROLÜ)
   void attemptLocalSave() {
     String currentHash = _calculateCurrentHash();
 
-    // Kural 1: Sıfır Yer Değiştirme Kalkanı
     if (currentHash == _initialHash) {
       debugPrint(
         "SİSTEM: Hash aynı. Sıfır yer değiştirme tespit edildi. Kayıt iptal!",
@@ -85,19 +79,16 @@ class EditorProvider extends ChangeNotifier {
       return;
     }
 
-    // Kural 2: Gerçekten bir şeyler değişmişse kaydet
     debugPrint("SİSTEM: Hash değişti. Yerel Diske kaydediliyor...");
-    _initialHash = currentHash; // Yeni başlangıç noktamız artık bu
+    _initialHash = currentHash;
     _isDirty = false;
     notifyListeners();
 
-    // UI tarafına (LocalStorageService'e) kaydetmesi için sinyal gönderiyoruz
     if (onLocalSaveTriggered != null) {
       onLocalSaveTriggered!(_documentTitle, jsonEncode(generateMroData()));
     }
   }
 
-  // Manuel kaydetme butonu veya Ctrl+S için
   void forceSave() {
     _autoSaveTimer?.cancel();
     attemptLocalSave();
@@ -109,17 +100,14 @@ class EditorProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // 🌟 GÜNCELLENDİ: SET DIRTY ARTIK DEBOUNCE SAYAÇLI
   void setDirty() {
     if (!_isDirty) {
       _isDirty = true;
       notifyListeners();
     }
 
-    // Kullanıcı her tuşa bastığında eski sayacı iptal et ve baştan saymaya başla
     _autoSaveTimer?.cancel();
     _autoSaveTimer = Timer(const Duration(seconds: 2), () {
-      // 2 saniye boyunca kimse tuşa basmazsa burası çalışır
       attemptLocalSave();
     });
   }
@@ -175,7 +163,6 @@ class EditorProvider extends ChangeNotifier {
   final Map<int, ui.Image> _imageCache = {};
   Map<int, ui.Image> get imageCache => _imageCache;
 
-  // 🌟 GÜNCELLENDİ: İLK AÇILIŞTA (SESSİZCE) HASH ALMA
   void initialize(String mroDataOrText, {String title = 'İsimsiz Not'}) {
     _documentTitle = title;
     try {
@@ -193,9 +180,8 @@ class EditorProvider extends ChangeNotifier {
     cursorIndex = engine.getText().length;
     selectionBase = null;
 
-    // 🌟 İlk açılışta sessizce parmak izini (Hash) hafızaya kazıyoruz
     _initialHash = _calculateCurrentHash();
-    _isDirty = false; // "Sahte tetiklenmeyi (False Trigger)" engelliyoruz.
+    _isDirty = false;
 
     _syncToolbarWithCursor();
     preloadImages();
@@ -212,7 +198,9 @@ class EditorProvider extends ChangeNotifier {
   }
 
   Future<void> _decodeAndCacheImage(int offset, String base64Str) async {
-    if (_imageCache.containsKey(offset)) return;
+    if (_imageCache.containsKey(offset)) {
+      return;
+    }
     try {
       final bytes = base64Decode(base64Str);
       final codec = await ui.instantiateImageCodec(bytes);
@@ -341,7 +329,9 @@ class EditorProvider extends ChangeNotifier {
 
   void selectWordAt(int index) {
     String text = engine.getText();
-    if (text.isEmpty) return;
+    if (text.isEmpty) {
+      return;
+    }
 
     int safeIndex = index.clamp(0, text.length - 1);
 
@@ -354,12 +344,12 @@ class EditorProvider extends ChangeNotifier {
     int end = safeIndex;
 
     while (start > 0 &&
-        !RegExp(r'[\s.,!?;:()[\]{}<>"' + "'" + ']').hasMatch(text[start - 1])) {
+        !RegExp(r'''[\s.,!?;:()[\]{}<>"']''').hasMatch(text[start - 1])) {
       start--;
     }
 
     while (end < text.length &&
-        !RegExp(r'[\s.,!?;:()[\]{}<>"' + "'" + ']').hasMatch(text[end])) {
+        !RegExp(r'''[\s.,!?;:()[\]{}<>"']''').hasMatch(text[end])) {
       end++;
     }
 
@@ -388,17 +378,23 @@ class EditorProvider extends ChangeNotifier {
 
   int get wordCount {
     String text = engine.getText().trim();
-    if (text.isEmpty) return 0;
+    if (text.isEmpty) {
+      return 0;
+    }
     return text.split(RegExp(r'\s+')).length;
   }
 
   void deleteSelection() {
-    if (!hasSelection) return;
+    if (!hasSelection) {
+      return;
+    }
     int start = math.min(selectionBase!, cursorIndex);
     int end = math.max(selectionBase!, cursorIndex);
 
     for (int i = start; i < end; i++) {
-      if (_imageCache.containsKey(i)) _imageCache.remove(i);
+      if (_imageCache.containsKey(i)) {
+        _imageCache.remove(i);
+      }
     }
 
     engine.delete(start, end - start);
@@ -408,7 +404,9 @@ class EditorProvider extends ChangeNotifier {
   }
 
   void insertText(String text) {
-    if (hasSelection) deleteSelection();
+    if (hasSelection) {
+      deleteSelection();
+    }
 
     engine.insert(
       cursorIndex,
@@ -433,7 +431,9 @@ class EditorProvider extends ChangeNotifier {
       deleteSelection();
     } else if (cursorIndex > 0) {
       int targetIndex = cursorIndex - 1;
-      if (_imageCache.containsKey(targetIndex)) _imageCache.remove(targetIndex);
+      if (_imageCache.containsKey(targetIndex)) {
+        _imageCache.remove(targetIndex);
+      }
       engine.delete(targetIndex, 1);
       cursorIndex--;
       _syncToolbarWithCursor();
@@ -444,8 +444,9 @@ class EditorProvider extends ChangeNotifier {
 
   void executeUndo() {
     if (engine.undo()) {
-      if (cursorIndex > engine.getText().length)
+      if (cursorIndex > engine.getText().length) {
         cursorIndex = engine.getText().length;
+      }
       selectionBase = null;
       _syncToolbarWithCursor();
       preloadImages();
@@ -456,8 +457,9 @@ class EditorProvider extends ChangeNotifier {
 
   void executeRedo() {
     if (engine.redo()) {
-      if (cursorIndex > engine.getText().length)
+      if (cursorIndex > engine.getText().length) {
         cursorIndex = engine.getText().length;
+      }
       selectionBase = null;
       _syncToolbarWithCursor();
       preloadImages();
@@ -474,7 +476,9 @@ class EditorProvider extends ChangeNotifier {
     double? fontSize,
     String? fontFamily,
   }) {
-    if (!hasSelection) return;
+    if (!hasSelection) {
+      return;
+    }
     int start = math.min(selectionBase!, cursorIndex);
     int end = math.max(selectionBase!, cursorIndex);
     engine.formatText(
@@ -549,6 +553,8 @@ class EditorProvider extends ChangeNotifier {
         fontLoader.addFont(Future.value(ByteData.view(fontBytes.buffer)));
         await fontLoader.load();
 
+        if (!context.mounted) return; // 🌟 GÜVENLİK AĞI
+
         if (!loadedFonts.contains(fontName)) {
           loadedFonts.add(fontName);
         }
@@ -561,6 +567,7 @@ class EditorProvider extends ChangeNotifier {
         );
       }
     } catch (e) {
+      if (!context.mounted) return; // 🌟 GÜVENLİK AĞI
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Font yüklenirken bir hata oluştu.')),
       );
@@ -590,9 +597,15 @@ class EditorProvider extends ChangeNotifier {
       String text = engine.getText();
       int start =
           text.lastIndexOf('\n', cursorIndex > 0 ? cursorIndex - 1 : 0) + 1;
-      if (start < 0) start = 0;
+
+      if (start < 0) {
+        start = 0;
+      }
+
       int end = text.indexOf('\n', cursorIndex);
-      if (end == -1) end = text.length;
+      if (end == -1) {
+        end = text.length;
+      }
 
       if (end > start) {
         engine.formatText(start, end - start, isBold: bold, fontSize: size);
