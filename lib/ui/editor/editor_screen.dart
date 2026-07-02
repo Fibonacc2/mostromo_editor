@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import '../../core/app_theme.dart';
 import '../../models/note.dart';
@@ -37,13 +38,42 @@ class _EditorScreenState extends State<EditorScreen> {
     _lastSavedTitle = widget.note?.title ?? '';
     _titleController = TextEditingController(text: _lastSavedTitle);
 
+    final provider = context.read<EditorProvider>();
+
     _titleController.addListener(() {
       if (!_isReadOnly && _titleController.text != _lastSavedTitle) {
-        context.read<EditorProvider>().setDirty();
+        provider.updateTitle(
+          _titleController.text,
+        ); // 🌟 DÜZELTME: Provider'a başlığı bildiriyoruz
       }
     });
 
-    context.read<EditorProvider>().initialize(widget.note?.mroData ?? '');
+    // 🌟 DÜZELTME 1: Başlığı da gönderiyoruz ki Hash Kalkanı doğru çalışsın
+    provider.initialize(widget.note?.mroData ?? '', title: _lastSavedTitle);
+
+    // 🌟 DÜZELTME 2: 2 Saniyelik Sessiz Kayıt (Debounce) Dinleyicisi
+    provider.onLocalSaveTriggered = (title, mroData) async {
+      if (_isReadOnly) return;
+
+      String plainText = provider.engine.getText();
+      String preview = plainText
+          .substring(0, math.min(100, plainText.length))
+          .replaceAll('\n', ' ');
+
+      final updatedNote = MostromoNote(
+        id: _noteId,
+        title: title.trim().isEmpty ? 'İsimsiz not' : title,
+        previewText: preview, // Otomatik özet metni
+        mroData: mroData,
+        lastUpdated: DateTime.now().toUtc(), // 🌟 UTC STANDARDINA UYULDU
+        isSynced: false, // 🌟 POSTACI İÇİN İŞARETLENDİ
+      );
+
+      await LocalStorageService.saveNote(updatedNote);
+      _lastSavedTitle = updatedNote.title;
+      provider.markAsSaved();
+      // Not: Bu arka plan (sessiz) kaydı olduğu için bilerek SnackBar göstermiyoruz, kullanıcıyı darlamasın.
+    };
   }
 
   @override
@@ -52,24 +82,13 @@ class _EditorScreenState extends State<EditorScreen> {
     super.dispose();
   }
 
+  // Manuel "Kaydet" butonuna basıldığında (SnackBar gösterir)
   Future<void> _saveNoteOnly() async {
     if (_isReadOnly) return;
     final provider = context.read<EditorProvider>();
-    if (!provider.isDirty && _titleController.text == _lastSavedTitle) return;
 
-    final String serializedMro = jsonEncode(provider.generateMroData());
-    final updatedNote = MostromoNote(
-      id: _noteId,
-      title: _titleController.text.trim().isEmpty
-          ? 'İsimsiz not'
-          : _titleController.text,
-      mroData: serializedMro,
-      lastUpdated: DateTime.now(),
-    );
-
-    await LocalStorageService.saveNote(updatedNote);
-    _lastSavedTitle = updatedNote.title;
-    provider.markAsSaved();
+    // Hash Kalkanı üzerinden manuel kaydetmeyi zorla (Bu işlem onLocalSaveTriggered'ı tetikler)
+    provider.forceSave();
 
     if (mounted) {
       ScaffoldMessenger.of(context).clearSnackBars();
@@ -124,16 +143,29 @@ class _EditorScreenState extends State<EditorScreen> {
     }
 
     final provider = context.read<EditorProvider>();
-    final String serializedMro = jsonEncode(provider.generateMroData());
-    final updatedNote = MostromoNote(
-      id: _noteId,
-      title: _titleController.text.trim().isEmpty
-          ? 'İsimsiz not'
-          : _titleController.text,
-      mroData: serializedMro,
-      lastUpdated: DateTime.now(),
-    );
-    Navigator.pop(context, updatedNote);
+
+    // Değişiklik varsa son bir kez kaydet
+    if (provider.isDirty || _titleController.text != _lastSavedTitle) {
+      String plainText = provider.engine.getText();
+      String preview = plainText
+          .substring(0, math.min(100, plainText.length))
+          .replaceAll('\n', ' ');
+
+      final updatedNote = MostromoNote(
+        id: _noteId,
+        title: _titleController.text.trim().isEmpty
+            ? 'İsimsiz not'
+            : _titleController.text,
+        previewText: preview,
+        mroData: jsonEncode(provider.generateMroData()),
+        lastUpdated: DateTime.now().toUtc(), // 🌟 UTC
+        isSynced: false, // 🌟 POSTACI İÇİN
+      );
+      Navigator.pop(context, updatedNote);
+    } else {
+      // Değişiklik yoksa boş dön, Dashboard boşuna diske yazmasın
+      Navigator.pop(context, null);
+    }
   }
 
   void _importAndUnlock() {
@@ -143,42 +175,47 @@ class _EditorScreenState extends State<EditorScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // 🌟 EKRAN GENİŞLİĞİNİ ÖLÇ (Telefon mu?)
     final bool isMobile = MediaQuery.of(context).size.width < 600;
 
-    return Scaffold(
-      backgroundColor: MostromoTheme.backgroundColor,
-      // 🌟 YENİ: Telefonda klavye açıldığında uygulamanın çökmesini (Overflow) engeller
-      resizeToAvoidBottomInset: true,
-      body: SafeArea(
-        child: Column(
-          children: [
-            MostromoTitleBar(
-              isEditor: true,
-              height: 48,
-              backgroundColor: const Color(0xFF161616),
-              titleController: _titleController,
-              onSave: _saveNoteOnly,
-              onClose: _saveAndClose,
-              isExternal: _isReadOnly,
-              onImport: _importAndUnlock,
-            ),
+    return PopScope(
+      // 🌟 DÜZELTME 3: Kullanıcı Android'in "Geri" tuşuna veya ekran kaydırmasına basarsa veri kaybolmasın diye araya giriyoruz.
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        _saveAndClose();
+      },
+      child: Scaffold(
+        backgroundColor: MostromoTheme.backgroundColor,
+        resizeToAvoidBottomInset: true,
+        body: SafeArea(
+          child: Column(
+            children: [
+              MostromoTitleBar(
+                isEditor: true,
+                height: 48,
+                backgroundColor: const Color(0xFF161616),
+                titleController: _titleController,
+                onSave: _saveNoteOnly,
+                onClose: _saveAndClose,
+                isExternal: _isReadOnly,
+                onImport: _importAndUnlock,
+              ),
 
-            if (!_isReadOnly) const EditorToolbar(),
+              if (!_isReadOnly) const EditorToolbar(),
 
-            Expanded(
-              child: FocusScope(
-                canRequestFocus: !_isReadOnly,
-                child: AbsorbPointer(
-                  absorbing: _isReadOnly,
-                  child: MostromoEditorWidget(onSave: _saveNoteOnly),
+              Expanded(
+                child: FocusScope(
+                  canRequestFocus: !_isReadOnly,
+                  child: AbsorbPointer(
+                    absorbing: _isReadOnly,
+                    child: MostromoEditorWidget(onSave: _saveNoteOnly),
+                  ),
                 ),
               ),
-            ),
 
-            // 🌟 YENİ: Alt Durum çubuğu çok yer kapladığı için telefonda gizliyoruz!
-            if (!isMobile) const MostromoStatusBar(),
-          ],
+              if (!isMobile) const MostromoStatusBar(),
+            ],
+          ),
         ),
       ),
     );
