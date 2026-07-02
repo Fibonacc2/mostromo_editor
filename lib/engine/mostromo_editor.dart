@@ -1,70 +1,18 @@
+// lib/engine/mostromo_editor.dart
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'dart:ui' as ui;
 import 'dart:math' as math;
 import 'dart:async';
 import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show kIsWeb;
+
 import '../providers/editor_provider.dart';
 import '../core/app_theme.dart';
+import 'page_layout.dart';
+import 'editor_painter.dart';
 
-class PageLayout {
-  final bool isPageMode;
-  final double a4Width;
-  final double a4Height;
-  final double pageGap;
-  final double marginTop;
-  final double marginBottom;
-  final double marginLeft;
-  final double marginRight;
-  final List<double> pageBreaks;
-  final double logicalHeight;
-
-  PageLayout({
-    required this.isPageMode,
-    required this.a4Width,
-    required this.a4Height,
-    required this.pageGap,
-    required this.marginTop,
-    required this.marginBottom,
-    required this.marginLeft,
-    required this.marginRight,
-    required this.pageBreaks,
-    required this.logicalHeight,
-  });
-
-  int get totalPages => isPageMode ? pageBreaks.length : 1;
-
-  double get physicalHeight {
-    if (!isPageMode) return logicalHeight;
-    return (totalPages * a4Height) + ((totalPages - 1) * pageGap);
-  }
-
-  double physicalToLogicalY(double physicalY) {
-    if (!isPageMode) return physicalY - 32.0;
-
-    int pageIndex = (physicalY / (a4Height + pageGap)).floor();
-    if (pageIndex < 0) pageIndex = 0;
-    if (pageIndex >= pageBreaks.length) pageIndex = pageBreaks.length - 1;
-
-    double localY = physicalY - (pageIndex * (a4Height + pageGap));
-    double offsetInPrintable = localY - marginTop;
-
-    double maxContentOnPage =
-        ((pageIndex + 1 < pageBreaks.length)
-            ? pageBreaks[pageIndex + 1]
-            : logicalHeight) -
-        pageBreaks[pageIndex];
-
-    if (offsetInPrintable < 0) offsetInPrintable = 0;
-    if (offsetInPrintable > maxContentOnPage) {
-      offsetInPrintable = maxContentOnPage;
-    }
-
-    return pageBreaks[pageIndex] + offsetInPrintable;
-  }
-}
+enum DragHandle { none, left, right }
 
 class MostromoEditorWidget extends StatefulWidget {
   final VoidCallback? onSave;
@@ -83,13 +31,22 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
   bool _showCursor = true;
   double? _intendedCursorX;
 
-  final TextEditingController _imeController = TextEditingController(text: ' ');
+  final TextEditingController _imeController = TextEditingController(
+    text: '\u200B',
+  );
   bool _isImeUpdating = false;
+  String _previousImeText = '\u200B';
+
+  DragHandle _currentDragHandle = DragHandle.none;
+  int _dragAnchorIndex = 0;
+  bool _isDraggingHandle = false;
+
+  TextPainter? _cachedTextPainter;
+  PageLayout? _cachedLayout;
 
   @override
   void initState() {
     super.initState();
-
     _focusNode = FocusNode(
       onKeyEvent: (node, event) {
         if (!mounted) return KeyEventResult.ignored;
@@ -118,19 +75,6 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
     super.dispose();
   }
 
-  @override
-  void didUpdateWidget(MostromoEditorWidget oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.isActive && !oldWidget.isActive) {
-      _focusNode.requestFocus();
-      _startBlinking();
-    } else if (!widget.isActive && oldWidget.isActive) {
-      _focusNode.unfocus();
-      _cursorTimer?.cancel();
-      setState(() => _showCursor = false);
-    }
-  }
-
   void _startBlinking() {
     _cursorTimer?.cancel();
     setState(() => _showCursor = true);
@@ -141,7 +85,46 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
     });
   }
 
-  // 🌟 YENİ: İKONLU VE GELİŞMİŞ YÜZEN MENÜ (CONTEXT MENU)
+  void _resetIme() {
+    _isImeUpdating = true;
+    _previousImeText = '\u200B';
+    _imeController.value = const TextEditingValue(
+      text: '\u200B',
+      selection: TextSelection.collapsed(offset: 1),
+    );
+    _isImeUpdating = false;
+  }
+
+  void _onImeChanged(String value, EditorProvider provider) {
+    if (_isImeUpdating) return;
+
+    if (value.startsWith(_previousImeText)) {
+      String added = value.substring(_previousImeText.length);
+      provider.insertText(added);
+    } else {
+      int commonPrefixLen = 0;
+      int minLen = math.min(_previousImeText.length, value.length);
+      while (commonPrefixLen < minLen &&
+          _previousImeText[commonPrefixLen] == value[commonPrefixLen]) {
+        commonPrefixLen++;
+      }
+
+      int charsToDelete = _previousImeText.length - commonPrefixLen;
+      for (int i = 0; i < charsToDelete; i++) {
+        provider.deleteCharacter();
+      }
+
+      String charsToAdd = value.substring(commonPrefixLen);
+      if (charsToAdd.isNotEmpty) {
+        provider.insertText(charsToAdd);
+      }
+    }
+
+    _previousImeText = value;
+    _startBlinking();
+  }
+
+  // 🌟 DÜZELTME: Menü artık seçimin 45 piksel ALTINDA açılıyor
   void _showContextMenu(
     BuildContext context,
     Offset globalPosition,
@@ -149,12 +132,15 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
   ) async {
     final RenderBox overlay =
         Overlay.of(context).context.findRenderObject() as RenderBox;
+    double menuY = globalPosition.dy + 45;
 
     final value = await showMenu<String>(
       context: context,
-      position: RelativeRect.fromRect(
-        globalPosition & const Size(40, 40),
-        Offset.zero & overlay.size,
+      position: RelativeRect.fromLTRB(
+        globalPosition.dx - 50,
+        menuY,
+        globalPosition.dx + 50,
+        menuY,
       ),
       color: const Color(0xFF2A2A2A),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -238,14 +224,13 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
       ],
     );
 
-    // Seçime göre eylem yapma
     if (value == 'copy' && provider.hasSelection) {
       final start = math.min(provider.selectionBase!, provider.cursorIndex);
       final end = math.max(provider.selectionBase!, provider.cursorIndex);
       Clipboard.setData(
         ClipboardData(text: provider.engine.getText().substring(start, end)),
       );
-      provider.updateSelection(provider.cursorIndex, null); // Seçimi bırak
+      provider.updateSelection(provider.cursorIndex, null);
     } else if (value == 'cut' && provider.hasSelection) {
       final start = math.min(provider.selectionBase!, provider.cursorIndex);
       final end = math.max(provider.selectionBase!, provider.cursorIndex);
@@ -262,26 +247,6 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
     } else if (value == 'italic') {
       provider.toggleItalic();
     }
-  }
-
-  void _onImeChanged(String value, EditorProvider provider) {
-    if (_isImeUpdating) return;
-    _isImeUpdating = true;
-
-    if (value.length > 1) {
-      String added = value.substring(1);
-      provider.insertText(added);
-    } else if (value.isEmpty) {
-      provider.deleteCharacter();
-    }
-
-    _imeController.value = const TextEditingValue(
-      text: ' ',
-      selection: TextSelection.collapsed(offset: 1),
-    );
-
-    _startBlinking();
-    _isImeUpdating = false;
   }
 
   Future<void> _pasteFromClipboard(EditorProvider provider) async {
@@ -371,6 +336,7 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
         );
       }
       provider.updateSelection(newCursor, newBase);
+      _resetIme();
       return true;
     }
 
@@ -397,11 +363,15 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
         return true;
       }
     }
-
     return false;
   }
 
-  TextPainter _buildPainter(EditorProvider provider, double maxWidth) {
+  TextPainter _buildPainter(
+    EditorProvider provider,
+    double maxWidth,
+    double mLeft,
+    double mRight,
+  ) {
     List<TextSpan> combinedSpans = List.from(
       provider.engine.getRichTextSpans(),
     );
@@ -417,7 +387,7 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
     );
 
     double printableWidth = provider.isPageMode
-        ? maxWidth - provider.marginLeft - provider.marginRight
+        ? maxWidth - mLeft - mRight
         : maxWidth - 64;
     if (printableWidth < 100) printableWidth = 100;
 
@@ -429,6 +399,10 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
     TextPainter textPainter,
     EditorProvider provider,
     double maxWidth,
+    double mLeft,
+    double mRight,
+    double mTop,
+    double mBottom,
   ) {
     double a4Height = maxWidth * 1.4142;
     double pageGap = 32.0;
@@ -448,8 +422,7 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
       );
     }
 
-    double printableHeight =
-        a4Height - provider.marginTop - provider.marginBottom;
+    double printableHeight = a4Height - mTop - mBottom;
     if (printableHeight < 100) printableHeight = 100;
 
     List<double> breaks = [0.0];
@@ -472,18 +445,19 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
       a4Width: maxWidth,
       a4Height: a4Height,
       pageGap: pageGap,
-      marginTop: provider.marginTop,
-      marginBottom: provider.marginBottom,
-      marginLeft: provider.marginLeft,
-      marginRight: provider.marginRight,
+      marginTop: mTop,
+      marginBottom: mBottom,
+      marginLeft: mLeft,
+      marginRight: mRight,
       pageBreaks: breaks,
       logicalHeight: accumulatedY,
     );
   }
 
   int _calculateVerticalMove(EditorProvider provider, bool isUp) {
+    if (_cachedTextPainter == null) return provider.cursorIndex;
     int len = provider.engine.getText().length;
-    final textPainter = _buildPainter(provider, _currentMaxWidth);
+    final textPainter = _cachedTextPainter!;
 
     final currentOffset = textPainter.getOffsetForCaret(
       TextPosition(
@@ -494,7 +468,6 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
     );
 
     _intendedCursorX ??= currentOffset.dx;
-
     final metrics = textPainter.computeLineMetrics();
     if (metrics.isEmpty) return isUp ? 0 : len;
 
@@ -524,14 +497,15 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
   }
 
   int _getOffsetIndex(Offset localPosition, EditorProvider provider) {
-    final textPainter = _buildPainter(provider, _currentMaxWidth);
-    final layout = _computeLayout(textPainter, provider, _currentMaxWidth);
+    if (_cachedTextPainter == null || _cachedLayout == null)
+      return provider.cursorIndex;
 
-    double logicalY = layout.physicalToLogicalY(localPosition.dy);
+    double logicalY = _cachedLayout!.physicalToLogicalY(localPosition.dy);
     double logicalX =
-        localPosition.dx - (provider.isPageMode ? layout.marginLeft : 32.0);
+        localPosition.dx -
+        (provider.isPageMode ? _cachedLayout!.marginLeft : 32.0);
 
-    final position = textPainter.getPositionForOffset(
+    final position = _cachedTextPainter!.getPositionForOffset(
       Offset(logicalX, logicalY),
     );
     return position.offset.clamp(0, provider.engine.getText().length);
@@ -542,14 +516,44 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
     final provider = context.watch<EditorProvider>();
     final bool isMobile = !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 
+    // 🌟 DÜZELTME: Mobilde devasa A4 boşluklarını kırpıp ekrana sığdırıyoruz
+    final double mLeft = isMobile && provider.isPageMode
+        ? 16.0
+        : provider.marginLeft;
+    final double mRight = isMobile && provider.isPageMode
+        ? 16.0
+        : provider.marginRight;
+    final double mTop = isMobile && provider.isPageMode
+        ? 24.0
+        : provider.marginTop;
+    final double mBottom = isMobile && provider.isPageMode
+        ? 24.0
+        : provider.marginBottom;
+
     Widget editorContent = LayoutBuilder(
       builder: (context, constraints) {
-        _currentMaxWidth = provider.isPageMode ? 800.0 : constraints.maxWidth;
+        // 🌟 DÜZELTME: A4 modu mobilde ekran dışına taşmasın diye `constraints.maxWidth` kullanılıyor
+        _currentMaxWidth = provider.isPageMode
+            ? (isMobile ? constraints.maxWidth : 800.0)
+            : constraints.maxWidth;
 
-        final textPainter = _buildPainter(provider, _currentMaxWidth);
-        final layout = _computeLayout(textPainter, provider, _currentMaxWidth);
+        _cachedTextPainter = _buildPainter(
+          provider,
+          _currentMaxWidth,
+          mLeft,
+          mRight,
+        );
+        _cachedLayout = _computeLayout(
+          _cachedTextPainter!,
+          provider,
+          _currentMaxWidth,
+          mLeft,
+          mRight,
+          mTop,
+          mBottom,
+        );
 
-        double customPaintHeight = layout.physicalHeight;
+        double customPaintHeight = _cachedLayout!.physicalHeight;
         if (!provider.isPageMode && customPaintHeight < constraints.maxHeight) {
           customPaintHeight = constraints.maxHeight;
         }
@@ -566,6 +570,9 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
             ),
           ),
           child: SingleChildScrollView(
+            physics: _isDraggingHandle
+                ? const NeverScrollableScrollPhysics()
+                : null,
             child: Container(
               width: constraints.maxWidth,
               constraints: BoxConstraints(minHeight: constraints.maxHeight),
@@ -579,29 +586,106 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
               child: MouseRegion(
                 cursor: SystemMouseCursors.text,
                 child: GestureDetector(
-                  onTapDown: (details) {
+                  onPanDown: (details) {
                     _focusNode.requestFocus();
                     _intendedCursorX = null;
-                    context.read<EditorProvider>().updateSelection(
-                      _getOffsetIndex(details.localPosition, provider),
-                      null,
-                    );
+                    _currentDragHandle = DragHandle.none;
+
+                    if (isMobile &&
+                        provider.hasSelection &&
+                        _cachedTextPainter != null &&
+                        _cachedLayout != null) {
+                      int startIdx = math.min(
+                        provider.selectionBase!,
+                        provider.cursorIndex,
+                      );
+                      int endIdx = math.max(
+                        provider.selectionBase!,
+                        provider.cursorIndex,
+                      );
+
+                      double logicalY = _cachedLayout!.physicalToLogicalY(
+                        details.localPosition.dy,
+                      );
+                      double logicalX =
+                          details.localPosition.dx -
+                          (provider.isPageMode
+                              ? _cachedLayout!.marginLeft
+                              : 32.0);
+                      Offset logicalTouch = Offset(logicalX, logicalY);
+
+                      final boxes = _cachedTextPainter!.getBoxesForSelection(
+                        TextSelection(
+                          baseOffset: startIdx,
+                          extentOffset: endIdx,
+                        ),
+                      );
+
+                      if (boxes.isNotEmpty) {
+                        Offset leftHandlePos = Offset(
+                          boxes.first.left,
+                          boxes.first.bottom + 6,
+                        );
+                        Offset rightHandlePos = Offset(
+                          boxes.last.right,
+                          boxes.last.bottom + 6,
+                        );
+
+                        if ((logicalTouch - leftHandlePos).distance < 70) {
+                          _currentDragHandle = DragHandle.left;
+                          _dragAnchorIndex = endIdx;
+                          setState(() => _isDraggingHandle = true);
+                          return;
+                        } else if ((logicalTouch - rightHandlePos).distance <
+                            70) {
+                          _currentDragHandle = DragHandle.right;
+                          _dragAnchorIndex = startIdx;
+                          setState(() => _isDraggingHandle = true);
+                          return;
+                        }
+                      }
+                    }
+                  },
+                  onTapUp: (details) {
+                    if (_currentDragHandle != DragHandle.none) return;
+
+                    int idx = _getOffsetIndex(details.localPosition, provider);
+
+                    if (provider.hasSelection) {
+                      int min = math.min(
+                        provider.selectionBase!,
+                        provider.cursorIndex,
+                      );
+                      int max = math.max(
+                        provider.selectionBase!,
+                        provider.cursorIndex,
+                      );
+                      if (idx >= min && idx <= max) {
+                        _showContextMenu(
+                          context,
+                          details.globalPosition,
+                          provider,
+                        );
+                        return;
+                      }
+                    }
+
+                    context.read<EditorProvider>().updateSelection(idx, null);
+                    _resetIme();
                     _startBlinking();
                   },
-                  // 🌟 YENİ: ÇİFT TIKLAYINCA KELİMEYİ SEÇ
                   onDoubleTapDown: (details) {
                     _focusNode.requestFocus();
                     _intendedCursorX = null;
                     int idx = _getOffsetIndex(details.localPosition, provider);
                     context.read<EditorProvider>().selectWordAt(idx);
+                    _resetIme();
                     _startBlinking();
                   },
-                  // 🌟 YENİ: BASILI TUTUNCA SEÇ VE MENÜYÜ AÇ
                   onLongPressStart: (details) {
                     _focusNode.requestFocus();
                     int idx = _getOffsetIndex(details.localPosition, provider);
 
-                    // Eğer dokunulan yer seçili alanın dışındaysa veya hiç seçim yoksa, o kelimeyi seç!
                     if (!provider.hasSelection) {
                       context.read<EditorProvider>().selectWordAt(idx);
                     } else {
@@ -617,33 +701,54 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
                         context.read<EditorProvider>().selectWordAt(idx);
                       }
                     }
-
-                    // Kelimeyi seçtikten sonra hemen menüyü patlat
+                    _resetIme();
                     _showContextMenu(context, details.globalPosition, provider);
                   },
                   onPanStart: (details) {
-                    _focusNode.requestFocus();
-                    int idx = _getOffsetIndex(details.localPosition, provider);
-                    context.read<EditorProvider>().updateSelection(idx, idx);
+                    if (_currentDragHandle == DragHandle.none) {
+                      int idx = _getOffsetIndex(
+                        details.localPosition,
+                        provider,
+                      );
+                      context.read<EditorProvider>().updateSelection(idx, idx);
+                      _resetIme();
+                    }
                   },
                   onPanUpdate: (details) {
                     int idx = _getOffsetIndex(details.localPosition, provider);
-                    context.read<EditorProvider>().updateSelection(
-                      idx,
-                      provider.selectionBase,
-                    );
+
+                    if (_currentDragHandle != DragHandle.none) {
+                      context.read<EditorProvider>().updateSelection(
+                        idx,
+                        _dragAnchorIndex,
+                      );
+                    } else {
+                      context.read<EditorProvider>().updateSelection(
+                        idx,
+                        provider.selectionBase,
+                      );
+                    }
+                  },
+                  onPanEnd: (details) {
+                    _currentDragHandle = DragHandle.none;
+                    setState(() => _isDraggingHandle = false);
+                  },
+                  onPanCancel: () {
+                    _currentDragHandle = DragHandle.none;
+                    setState(() => _isDraggingHandle = false);
                   },
                   child: CustomPaint(
                     size: Size(_currentMaxWidth, customPaintHeight),
                     painter: EditorPainter(
-                      textPainter: textPainter,
-                      layout: layout,
+                      textPainter: _cachedTextPainter!,
+                      layout: _cachedLayout!,
                       plainTextLength: provider.engine.getText().length,
                       cursorIndex: provider.cursorIndex,
                       selectionBase: provider.selectionBase,
                       showCursor: _showCursor,
                       currentFontSize: provider.currentFontSize ?? 16.0,
                       imageCache: provider.imageCache,
+                      isMobile: isMobile,
                     ),
                   ),
                 ),
@@ -669,8 +774,9 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
                 autofocus: widget.isActive,
                 maxLines: null,
                 keyboardType: TextInputType.multiline,
-                autocorrect: false,
-                enableSuggestions: false,
+                textCapitalization: TextCapitalization.sentences,
+                autocorrect: true,
+                enableSuggestions: true,
                 onChanged: (val) => _onImeChanged(val, provider),
               ),
             ),
@@ -687,186 +793,5 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
         ),
       ],
     );
-  }
-}
-
-class EditorPainter extends CustomPainter {
-  final TextPainter textPainter;
-  final PageLayout layout;
-  final int plainTextLength;
-  final int cursorIndex;
-  final int? selectionBase;
-  final bool showCursor;
-  final double currentFontSize;
-  final Map<int, ui.Image> imageCache;
-
-  EditorPainter({
-    required this.textPainter,
-    required this.layout,
-    required this.plainTextLength,
-    required this.cursorIndex,
-    required this.showCursor,
-    this.selectionBase,
-    required this.currentFontSize,
-    required this.imageCache,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    void drawContent() {
-      if (selectionBase != null && selectionBase != cursorIndex) {
-        final start = math.min(selectionBase!, cursorIndex);
-        final end = math.max(selectionBase!, cursorIndex);
-        final boxes = textPainter.getBoxesForSelection(
-          TextSelection(baseOffset: start, extentOffset: end),
-        );
-        final selectionPaint = Paint()
-          ..color = MostromoTheme.accentColor.withValues(alpha: 0.3);
-        for (final box in boxes) {
-          canvas.drawRect(box.toRect(), selectionPaint);
-        }
-      }
-
-      textPainter.paint(canvas, Offset.zero);
-
-      if (imageCache.isNotEmpty) {
-        final paint = Paint()..filterQuality = FilterQuality.high;
-
-        imageCache.forEach((offsetIndex, uiImage) {
-          final boxes = textPainter.getBoxesForSelection(
-            TextSelection(
-              baseOffset: offsetIndex,
-              extentOffset: offsetIndex + 1,
-            ),
-          );
-
-          if (boxes.isNotEmpty) {
-            final rect = boxes.first.toRect();
-            canvas.drawImageRect(
-              uiImage,
-              Rect.fromLTWH(
-                0,
-                0,
-                uiImage.width.toDouble(),
-                uiImage.height.toDouble(),
-              ),
-              rect,
-              paint,
-            );
-          }
-        });
-      }
-
-      if (showCursor) {
-        final caretOffset = textPainter.getOffsetForCaret(
-          TextPosition(offset: cursorIndex, affinity: TextAffinity.downstream),
-          Rect.zero,
-        );
-        final cursorPaint = Paint()
-          ..color = MostromoTheme.accentColor
-          ..strokeWidth = 2.0;
-        double cursorHeight = currentFontSize * 1.15;
-        double cursorTop = caretOffset.dy;
-
-        int leftIndex = cursorIndex - 1;
-        int rightIndex = cursorIndex;
-        Rect? validBox;
-
-        if (leftIndex >= 0 && leftIndex < plainTextLength) {
-          final boxes = textPainter.getBoxesForSelection(
-            TextSelection(baseOffset: leftIndex, extentOffset: leftIndex + 1),
-          );
-          if (boxes.isNotEmpty && (boxes.last.top - cursorTop).abs() < 5.0)
-            validBox = boxes.last.toRect();
-        }
-        if (validBox == null && rightIndex < plainTextLength) {
-          final boxes = textPainter.getBoxesForSelection(
-            TextSelection(baseOffset: rightIndex, extentOffset: rightIndex + 1),
-          );
-          if (boxes.isNotEmpty && (boxes.first.top - cursorTop).abs() < 5.0)
-            validBox = boxes.first.toRect();
-        }
-
-        if (validBox != null) {
-          cursorTop = validBox.top;
-          cursorHeight = validBox.height;
-        }
-
-        canvas.drawLine(
-          Offset(caretOffset.dx, cursorTop),
-          Offset(caretOffset.dx, cursorTop + cursorHeight),
-          cursorPaint,
-        );
-      }
-    }
-
-    if (!layout.isPageMode) {
-      canvas.drawRect(
-        Offset.zero & size,
-        Paint()..color = MostromoTheme.backgroundColor,
-      );
-      canvas.translate(32, 32);
-      drawContent();
-    } else {
-      for (int i = 0; i < layout.totalPages; i++) {
-        canvas.save();
-        double pageTop = i * (layout.a4Height + layout.pageGap);
-        Rect pageRect = Rect.fromLTWH(
-          0,
-          pageTop,
-          layout.a4Width,
-          layout.a4Height,
-        );
-
-        canvas.drawShadow(
-          Path()..addRect(pageRect),
-          Colors.black.withValues(alpha: 0.6),
-          16.0,
-          true,
-        );
-        canvas.drawRect(
-          pageRect,
-          Paint()..color = MostromoTheme.backgroundColor,
-        );
-        canvas.drawRect(
-          pageRect,
-          Paint()
-            ..color = Colors.white10
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 1,
-        );
-
-        double startLogicalY = layout.pageBreaks[i];
-        double contentHeightForThisPage = (i + 1 < layout.pageBreaks.length)
-            ? (layout.pageBreaks[i + 1] - startLogicalY)
-            : (layout.logicalHeight - startLogicalY);
-
-        Rect printableRect = Rect.fromLTWH(
-          layout.marginLeft,
-          pageTop + layout.marginTop,
-          layout.a4Width - layout.marginLeft - layout.marginRight,
-          contentHeightForThisPage,
-        );
-
-        canvas.clipRect(printableRect);
-        canvas.translate(
-          layout.marginLeft,
-          pageTop + layout.marginTop - startLogicalY,
-        );
-
-        drawContent();
-        canvas.restore();
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant EditorPainter oldDelegate) {
-    return oldDelegate.plainTextLength != plainTextLength ||
-        oldDelegate.cursorIndex != cursorIndex ||
-        oldDelegate.selectionBase != selectionBase ||
-        oldDelegate.showCursor != showCursor ||
-        oldDelegate.layout != layout ||
-        oldDelegate.currentFontSize != currentFontSize;
   }
 }

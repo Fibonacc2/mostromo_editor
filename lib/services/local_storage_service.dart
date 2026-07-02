@@ -1,3 +1,4 @@
+/*
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
@@ -115,6 +116,119 @@ class LocalStorageService {
   }
 
   /// Buluttan gelen ham JSON verisini anında fiziksel diske yazar
+  static Future<void> saveRawCloudData(
+    String id,
+    String extension,
+    String rawJsonData,
+  ) async {
+    final file = File('${_notesDirectory.path}/$id$extension');
+    await file.writeAsString(rawJsonData);
+  }
+}
+*/
+
+import 'dart:convert';
+import 'dart:io';
+import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
+import '../models/note.dart';
+
+class LocalStorageService {
+  static late Directory _notesDirectory;
+
+  static Future<void> init() async {
+    final docsDir = await getApplicationDocumentsDirectory();
+    _notesDirectory = Directory('${docsDir.path}/MostromoNotes');
+
+    if (!await _notesDirectory.exists()) {
+      await _notesDirectory.create(recursive: true);
+    }
+  }
+
+  static Future<void> saveNote(MostromoNote note) async {
+    final file = File('${_notesDirectory.path}/${note.id}${note.extension}');
+
+    final Map<String, dynamic> fileData = {
+      'id': note.id,
+      'title': note.title,
+      'previewText': note.previewText,
+      'lastUpdated': note.lastUpdated.toIso8601String(),
+      'isSynced': note.isSynced, // 🌟 POSTACI BURAYA BAKACAK
+      'extension': note.extension,
+    };
+
+    try {
+      if (note.extension == '.mrb') {
+        fileData['engine'] = note.mrbData.isNotEmpty
+            ? jsonDecode(note.mrbData)
+            : [];
+      } else {
+        fileData['engine'] = note.mroData.isNotEmpty
+            ? jsonDecode(note.mroData)
+            : {};
+      }
+    } catch (e) {
+      fileData['engine'] = note.extension == '.mrb' ? [] : {};
+    }
+
+    await file.writeAsString(jsonEncode(fileData));
+  }
+
+  static Future<List<MostromoNote>> loadAllNotes() async {
+    final List<MostromoNote> notes = [];
+    if (!await _notesDirectory.exists()) return notes;
+
+    final files = _notesDirectory.listSync().whereType<File>().where(
+      (f) => f.path.endsWith('.mro') || f.path.endsWith('.mrb'),
+    );
+
+    for (final file in files) {
+      try {
+        final content = await file.readAsString();
+        final Map<String, dynamic> json = jsonDecode(content);
+
+        final String ext =
+            json['extension'] ?? (file.path.endsWith('.mrb') ? '.mrb' : '.mro');
+
+        notes.add(
+          MostromoNote(
+            id: json['id'],
+            title: json['title'],
+            previewText: json['previewText'] ?? '',
+            lastUpdated: DateTime.parse(json['lastUpdated']),
+            isSynced: json['isSynced'] ?? false,
+            extension: ext,
+            mroData: ext == '.mro' ? jsonEncode(json['engine'] ?? {}) : '',
+            mrbData: ext == '.mrb' ? jsonEncode(json['engine'] ?? []) : '',
+          ),
+        );
+      } catch (e) {
+        debugPrint('Dosya okunamadı: ${file.path}');
+      }
+    }
+
+    notes.sort((a, b) => b.lastUpdated.compareTo(a.lastUpdated));
+    return notes;
+  }
+
+  static Future<void> deleteNote(String id, String extension) async {
+    final file = File('${_notesDirectory.path}/$id$extension');
+    if (await file.exists()) {
+      await file.delete();
+    }
+  }
+
+  static Future<String> readNoteContentForCloud(
+    String id,
+    String extension,
+  ) async {
+    final file = File('${_notesDirectory.path}/$id$extension');
+    if (await file.exists()) {
+      return await file.readAsString();
+    }
+    return '';
+  }
+
   static Future<void> saveRawCloudData(
     String id,
     String extension,

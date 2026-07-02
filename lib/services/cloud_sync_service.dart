@@ -1,3 +1,4 @@
+/*
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -221,6 +222,209 @@ class CloudSyncService {
       }
     } catch (e) {
       debugPrint("❌ [DOWNLOAD] Uygulama İçi Çökme: $e");
+    }
+  }
+}
+*/
+
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../models/note.dart';
+import 'local_storage_service.dart';
+import '../core/sync_utils.dart'; // 🌟 YENİ: Hash ve Zaman araçlarımız
+
+class CloudSyncService {
+  static const String baseUrl =
+      "https://mostromo.com/connect/android/notes_api.php";
+  static int currentUserId = 0;
+
+  static Future<bool> checkLoginStatus() async {
+    final prefs = await SharedPreferences.getInstance();
+    final id = prefs.getInt('user_id');
+
+    if (id != null && id > 0) {
+      currentUserId = id;
+      return true;
+    }
+    return false;
+  }
+
+  /// 🌟 POSTACI: Akıllı Senkronizasyon (Toplu İşlem)
+  static Future<void> syncAllNotes() async {
+    if (!await checkLoginStatus()) return;
+
+    try {
+      debugPrint("🔄 [POSTACI] Mesaiye Başladı (UserID: $currentUserId)...");
+
+      final List<MostromoNote> localNotes =
+          await LocalStorageService.loadAllNotes();
+
+      // 1. Sunucudan sadece METADATA (Liste) çekiyoruz
+      final response = await http.get(
+        Uri.parse('$baseUrl?action=list&user_id=$currentUserId'),
+      );
+
+      if (response.statusCode != 200) {
+        debugPrint("❌ [POSTACI] Sunucuya ulaşılamadı.");
+        return;
+      }
+
+      final List<dynamic> cloudData = jsonDecode(response.body)['notes'] ?? [];
+
+      // Buluttaki verileri UTC tarihlere çevirerek haritaya koy
+      Map<String, Map<String, dynamic>> cloudNotesMap = {};
+      for (var item in cloudData) {
+        cloudNotesMap[item['id'].toString()] = {
+          'date': DateTime.parse(
+            item['lastUpdated'],
+          ).toUtc(), // Sunucu tarihini UTC yap
+          'hash': item['hash'] ?? '',
+        };
+      }
+
+      // 2. Yerel Dosyaları Tarama
+      for (var localNote in localNotes) {
+        final cloudInfo = cloudNotesMap[localNote.id];
+
+        if (cloudInfo == null) {
+          // Sunucuda yok ama yerelde var. (Kullanıcı offline iken yeni not açmış)
+          if (!localNote.isSynced) {
+            debugPrint(
+              "⬆️ [POSTACI] '${localNote.title}' yeni dosya, buluta fırlatılıyor...",
+            );
+            await uploadNote(localNote);
+          }
+        } else {
+          final DateTime cloudDate = cloudInfo['date'];
+
+          // Milisaniye bazında kesin kıyaslama
+          final int localTimeMs = localNote.lastUpdated.millisecondsSinceEpoch;
+          final int cloudTimeMs = cloudDate.millisecondsSinceEpoch;
+
+          if (!localNote.isSynced) {
+            // YERELDE DEĞİŞİKLİK YAPILMIŞ: Hangi dosya daha güncel? (Son Yazan Kazanır)
+            if (localTimeMs >= cloudTimeMs) {
+              debugPrint(
+                "⬆️ [POSTACI] '${localNote.title}' yerelde güncellenmiş. Buluta fırlatılıyor...",
+              );
+              await uploadNote(localNote);
+            } else {
+              debugPrint(
+                "⬇️ [POSTACI] '${localNote.title}' ÇAKIŞMA: Buluttaki dosya daha yeni. İndiriliyor...",
+              );
+              await downloadAndSaveNoteLocally(localNote.id);
+            }
+          } else {
+            // YERELDE DEĞİŞİKLİK YOK (isSynced = true). Sadece bulutta yeni bir şey var mı diye bak.
+            if (cloudTimeMs > localTimeMs) {
+              debugPrint(
+                "⬇️ [POSTACI] '${localNote.title}' bulutta güncellenmiş. İndiriliyor...",
+              );
+              await downloadAndSaveNoteLocally(localNote.id);
+            }
+          }
+        }
+        // İncelenen dosyayı haritadan sil ki geriye sadece yerelde olmayanlar kalsın
+        cloudNotesMap.remove(localNote.id);
+      }
+
+      // 3. Yerelde olmayan (başka cihazdan açılmış) dosyaları indir
+      for (String missingLocalId in cloudNotesMap.keys) {
+        debugPrint(
+          "⬇️ [POSTACI] Eksik dosya bulundu ($missingLocalId), indiriliyor...",
+        );
+        await downloadAndSaveNoteLocally(missingLocalId);
+      }
+
+      debugPrint("✅ [POSTACI] Mesaisi Bitti. Tüm dosyalar güncel!");
+    } catch (e) {
+      debugPrint("❌ [POSTACI] Kaza Yaptı: $e");
+    }
+  }
+
+  /// 🌟 YÜKLEME MOTORU (Sadece güncellenmişleri gönderir)
+  static Future<void> uploadNote(MostromoNote note) async {
+    if (currentUserId == 0) return;
+
+    try {
+      final fileContent = await LocalStorageService.readNoteContentForCloud(
+        note.id,
+        note.extension,
+      );
+
+      // Merkezi alet çantasından Hash üretiyoruz
+      final hashToSave = SyncUtils.generateHash(note.title, fileContent);
+
+      final requestUrl = '$baseUrl?action=sync&user_id=$currentUserId';
+
+      final response = await http.post(
+        Uri.parse(requestUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'id': note.id,
+          'title': note.title,
+          'previewText': note.previewText,
+          // Sunucuya HER ZAMAN UTC formatında gönder
+          'lastUpdated': note.lastUpdated.toUtc().toIso8601String(),
+          'extension': note.extension,
+          'hash': hashToSave,
+          'fileData': fileContent,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final responseData = jsonDecode(response.body);
+        if (responseData['success'] == true) {
+          debugPrint("✅ [UPLOAD] '${note.title}' başarıyla yüklendi.");
+
+          // Yükleme başarılı olduğu için bayrağı tekrar kilitliyoruz
+          note.isSynced = true;
+          await LocalStorageService.saveNote(note);
+        }
+      }
+    } catch (e) {
+      debugPrint("❌ [UPLOAD] Beklenmeyen Hata: $e");
+    }
+  }
+
+  /// 🌟 İNDİRME MOTORU
+  static Future<void> downloadAndSaveNoteLocally(String noteId) async {
+    try {
+      final requestUrl =
+          '$baseUrl?action=download&id=$noteId&user_id=$currentUserId';
+      final response = await http.get(Uri.parse(requestUrl));
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['success'] == true) {
+          final downloadedNote = MostromoNote(
+            id: data['id'].toString(),
+            title: data['title'] ?? 'İsimsiz Defter',
+            previewText: data['previewText'] ?? '',
+            // Buluttan geleni her zaman UTC olarak kabul edip diske bas
+            lastUpdated: DateTime.parse(
+              data['lastUpdated'] ?? DateTime.now().toUtc().toIso8601String(),
+            ).toUtc(),
+            isSynced: true, // Buluttan geldiği için taze ve güncel
+            extension: data['extension'] ?? '.mro',
+          );
+
+          // Önce ham JSON'ı, sonra Note modelini fiziksel diske yazıyoruz
+          await LocalStorageService.saveRawCloudData(
+            downloadedNote.id,
+            downloadedNote.extension,
+            data['fileData'] ?? '{}',
+          );
+          await LocalStorageService.saveNote(downloadedNote);
+
+          debugPrint("✅ [DOWNLOAD] '$noteId' başarıyla indirildi.");
+        }
+      }
+    } catch (e) {
+      debugPrint("❌ [DOWNLOAD] Çökme: $e");
     }
   }
 }

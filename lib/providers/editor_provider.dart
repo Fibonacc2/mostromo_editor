@@ -6,11 +6,22 @@ import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:file_picker/file_picker.dart';
 import 'dart:math' as math;
+import 'dart:async'; // 🌟 YENİ: Timer (Debounce) için
+
 import '../engine/piece_table.dart';
 import '../engine/piece.dart';
+import '../core/sync_utils.dart'; // 🌟 YENİ: Hash Kalkanı için
 
 class EditorProvider extends ChangeNotifier {
   PieceTable engine = PieceTable(initialText: '');
+
+  // 🌟 YENİ: SENKRONİZASYON VE HASH DEĞİŞKENLERİ
+  String _documentTitle = '';
+  String _initialHash = ''; // Dosya açıldığındaki parmak izi
+  Timer? _autoSaveTimer; // 2 saniyelik geri sayım sayacı
+
+  // Dışarıdan yakalamak için bir Callback (Local Storage'a haber verecek)
+  Function(String title, String mroData)? onLocalSaveTriggered;
 
   bool get canUndo => engine.canUndo();
   bool get canRedo => engine.canRedo();
@@ -33,6 +44,7 @@ class EditorProvider extends ChangeNotifier {
   int cursorIndex = 0;
   int? selectionBase;
 
+  String get documentTitle => _documentTitle; // 🌟 YENİ
   bool get isBold => _isBold;
   bool get isItalic => _isItalic;
   bool get isUnderline => _isUnderline;
@@ -43,20 +55,73 @@ class EditorProvider extends ChangeNotifier {
 
   bool _isDirty = false;
   bool get isDirty => _isDirty;
-
   bool get hasSelection =>
       selectionBase != null && selectionBase != cursorIndex;
 
+  // 🌟 YENİ: BAŞLIK GÜNCELLEME MOTORU
+  void updateTitle(String newTitle) {
+    if (_documentTitle != newTitle) {
+      _documentTitle = newTitle;
+      setDirty(); // Başlık değişirse de otomatik kaydetmeyi tetikle
+    }
+  }
+
+  // 🌟 YENİ: ANLIK PARMAK İZİ HESAPLAYICI
+  String _calculateCurrentHash() {
+    return SyncUtils.generateHash(_documentTitle, engine.getText());
+  }
+
+  // 🌟 YENİ: AKILLI KAYDETME MOTORU (DEBOUNCE KONTROLÜ)
+  void attemptLocalSave() {
+    String currentHash = _calculateCurrentHash();
+
+    // Kural 1: Sıfır Yer Değiştirme Kalkanı
+    if (currentHash == _initialHash) {
+      debugPrint(
+        "SİSTEM: Hash aynı. Sıfır yer değiştirme tespit edildi. Kayıt iptal!",
+      );
+      _isDirty = false;
+      notifyListeners();
+      return;
+    }
+
+    // Kural 2: Gerçekten bir şeyler değişmişse kaydet
+    debugPrint("SİSTEM: Hash değişti. Yerel Diske kaydediliyor...");
+    _initialHash = currentHash; // Yeni başlangıç noktamız artık bu
+    _isDirty = false;
+    notifyListeners();
+
+    // UI tarafına (LocalStorageService'e) kaydetmesi için sinyal gönderiyoruz
+    if (onLocalSaveTriggered != null) {
+      onLocalSaveTriggered!(_documentTitle, jsonEncode(generateMroData()));
+    }
+  }
+
+  // Manuel kaydetme butonu veya Ctrl+S için
+  void forceSave() {
+    _autoSaveTimer?.cancel();
+    attemptLocalSave();
+  }
+
   void markAsSaved() {
+    _initialHash = _calculateCurrentHash();
     _isDirty = false;
     notifyListeners();
   }
 
+  // 🌟 GÜNCELLENDİ: SET DIRTY ARTIK DEBOUNCE SAYAÇLI
   void setDirty() {
     if (!_isDirty) {
       _isDirty = true;
       notifyListeners();
     }
+
+    // Kullanıcı her tuşa bastığında eski sayacı iptal et ve baştan saymaya başla
+    _autoSaveTimer?.cancel();
+    _autoSaveTimer = Timer(const Duration(seconds: 2), () {
+      // 2 saniye boyunca kimse tuşa basmazsa burası çalışır
+      attemptLocalSave();
+    });
   }
 
   int _activeTab = 0;
@@ -110,7 +175,9 @@ class EditorProvider extends ChangeNotifier {
   final Map<int, ui.Image> _imageCache = {};
   Map<int, ui.Image> get imageCache => _imageCache;
 
-  void initialize(String mroDataOrText) {
+  // 🌟 GÜNCELLENDİ: İLK AÇILIŞTA (SESSİZCE) HASH ALMA
+  void initialize(String mroDataOrText, {String title = 'İsimsiz Not'}) {
+    _documentTitle = title;
     try {
       final Map<String, dynamic> jsonMap = jsonDecode(mroDataOrText);
       engine = PieceTable.fromMroJson(jsonMap);
@@ -125,6 +192,11 @@ class EditorProvider extends ChangeNotifier {
 
     cursorIndex = engine.getText().length;
     selectionBase = null;
+
+    // 🌟 İlk açılışta sessizce parmak izini (Hash) hafızaya kazıyoruz
+    _initialHash = _calculateCurrentHash();
+    _isDirty = false; // "Sahte tetiklenmeyi (False Trigger)" engelliyoruz.
+
     _syncToolbarWithCursor();
     preloadImages();
   }
@@ -267,14 +339,12 @@ class EditorProvider extends ChangeNotifier {
     }
   }
 
-  // 🌟 YENİ: ÇİFT TIKLAMA VEYA BASILI TUTMA İLE KELİME SEÇME MOTORU
   void selectWordAt(int index) {
     String text = engine.getText();
     if (text.isEmpty) return;
 
     int safeIndex = index.clamp(0, text.length - 1);
 
-    // Eğer boşluğa veya noktalama işaretine tıkladıysa kelime seçme, sadece imleci koy
     if (RegExp(r'\s').hasMatch(text[safeIndex])) {
       updateSelection(safeIndex, null);
       return;
@@ -283,13 +353,11 @@ class EditorProvider extends ChangeNotifier {
     int start = safeIndex;
     int end = safeIndex;
 
-    // Sola doğru kelimenin başını bul
     while (start > 0 &&
         !RegExp(r'[\s.,!?;:()[\]{}<>"' + "'" + ']').hasMatch(text[start - 1])) {
       start--;
     }
 
-    // Sağa doğru kelimenin sonunu bul
     while (end < text.length &&
         !RegExp(r'[\s.,!?;:()[\]{}<>"' + "'" + ']').hasMatch(text[end])) {
       end++;

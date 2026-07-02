@@ -4,30 +4,31 @@ class MostromoNote {
   String previewText;
   DateTime lastUpdated;
 
-  // Bulut ve Çoklu Motor (Dual-Engine) Metadataları
+  // Bulut ve Çoklu Motor Metadataları
   bool isSynced;
   String extension;
 
-  // Motor Verileri (Uyumluluk için geri eklendi)
-  String mroData; // Klasik A4 Motoru verisi (.mro)
-  String mrbData; // Özgür Tuval verisi (.mrb)
+  String mroData;
+  String mrbData;
 
   MostromoNote({
     required this.id,
     required this.title,
     this.previewText = '',
-    required this.lastUpdated,
+    required DateTime lastUpdated, // 🌟 KİLİT 1: Dışarıdan gelen tarihi alır
     this.isSynced = false,
     this.extension = '.mro',
     this.mroData = '',
     this.mrbData = '',
-  });
+  }) : lastUpdated = lastUpdated.isUtc ? lastUpdated : lastUpdated.toUtc();
+  // 🌟 KİLİT 2: Eğer tarih yerel saatse, onu ZORLA UTC'ye (Evrensel Saate) çevirir!
 
   Map<String, dynamic> toJson() => {
     'id': id,
     'title': title,
     'previewText': previewText,
-    'lastUpdated': lastUpdated.toIso8601String(),
+    'lastUpdated': lastUpdated
+        .toIso8601String(), // Her zaman sonuna 'Z' (UTC) ekler
     'isSynced': isSynced,
     'extension': extension,
     'mroData': mroData,
