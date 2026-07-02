@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../core/app_theme.dart';
 import '../../models/note.dart';
@@ -7,9 +8,7 @@ import '../../services/cloud_sync_service.dart';
 
 import '../editor/block_editor_screen.dart';
 import '../editor/editor_screen.dart';
-
-import 'package:flutter/services.dart'; // YENİ: MethodChannel için
-import '../reader/offline_reader_screen.dart'; // YENİ: Reader sayfasına yönlendirmek için
+import '../reader/offline_reader_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -18,19 +17,40 @@ class DashboardScreen extends StatefulWidget {
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
-class _DashboardScreenState extends State<DashboardScreen> {
+// 🌟 YENİ: WidgetsBindingObserver eklendi (Uygulamanın uykuya dalmasını dinlemek için)
+class _DashboardScreenState extends State<DashboardScreen>
+    with WidgetsBindingObserver {
   bool _isGridView = true;
   List<MostromoNote> _notes = [];
 
-  // 🌟 YENİ: Kotlin ile iletişim kuracağımız hat
   static const platform = MethodChannel('mostromo/file_intent');
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this); // 🌟 Dinleyiciyi başlat
+
     _loadNotesFromDisk();
     _runCloudSync();
-    _listenForFileIntents(); // 🌟 YENİ
+    _listenForFileIntents();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this); // 🌟 Dinleyiciyi yok et
+    super.dispose();
+  }
+
+  // 🌟 YENİ: KULLANICI UYGULAMAYI ARKA PLANA ATTIĞINDA ÇALIŞIR (KATMAN 3)
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive) {
+      debugPrint(
+        "💤 Uygulama arka plana atıldı. Postacı (Sync) son kez çalıştırılıyor...",
+      );
+      CloudSyncService.syncAllNotes();
+    }
   }
 
   Future<void> _runCloudSync() async {
@@ -47,9 +67,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     });
   }
 
-  // --- 🌟 DOSYA YAKALAMA VE YÖNLENDİRME MOTORU ---
   void _listenForFileIntents() async {
-    // DURUM 1: Uygulama tamamen kapalıyken dışarıdan bir dosyayla başlatıldıysa
     try {
       final String? filePath = await platform.invokeMethod('getInitialFile');
       if (filePath != null && filePath.isNotEmpty) {
@@ -59,7 +77,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       debugPrint("Intent Başlatma Hatası: $e");
     }
 
-    // DURUM 2: Uygulama arka planda açıkken dışarıdan yeni bir dosyaya tıklandıysa
     platform.setMethodCallHandler((call) async {
       if (call.method == "onFileOpened") {
         final String filePath = call.arguments;
@@ -69,7 +86,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   void _openExternalReader(String filePath) {
-    // Yakalanan dosyayı direkt muazzam Splash animasyonlu Reader ekranımıza fırlat!
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (context) => OfflineReaderScreen(filePath: filePath),
@@ -77,16 +93,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  // 🌟 GÜNCELLENDİ: ARTIK KÖRÜ KÖRÜNE YÜKLEME YOK, POSTACI ÇAĞRILIYOR
   void _handleReturnedNote(dynamic returnedNote) async {
     if (returnedNote != null && returnedNote is MostromoNote) {
-      returnedNote.isSynced = false;
-
-      await LocalStorageService.saveNote(returnedNote);
+      // EditorScreen zaten diske kaydetti, biz sadece listeyi yenileyip Postacıyı dürtüyoruz.
       _loadNotesFromDisk();
 
-      CloudSyncService.uploadNote(returnedNote).then((_) {
+      // 🌟 YENİ: Sadece bu dosyayı değil, tüm sistemi akıllıca kontrol et (Hash Kalkanı vs.)
+      CloudSyncService.syncAllNotes().then((_) {
         if (mounted) _loadNotesFromDisk();
       });
+    } else {
+      // Değişiklik yapılmadan (Sıfır yer değiştirme) dönülmüşse bile listeyi yenile
+      _loadNotesFromDisk();
     }
   }
 
@@ -122,7 +141,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            _buildTopBar(isMobile), // Cihaza göre şekil alan akıllı üst bar
+            _buildTopBar(isMobile),
             Expanded(
               child: _notes.isEmpty
                   ? const Center(
@@ -144,7 +163,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // --- RESPONSIVE ÜST BİLGİ ÇUBUĞU ---
   Widget _buildTopBar(bool isMobile) {
     return Container(
       padding: EdgeInsets.symmetric(
@@ -153,7 +171,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
       child: isMobile
           ? Column(
-              // 📱 Telefon için dikey hizalama (Alt alta)
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
@@ -224,7 +241,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ],
             )
           : Row(
-              // 🖥️ Masaüstü için yatay hizalama (Yan yana)
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 const Text(
@@ -292,7 +308,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // --- KART VE LİSTE GÖRÜNÜMLERİ (AKILLI BOŞLUKLU) ---
   Widget _buildGridView(bool isMobile) {
     return GridView.builder(
       padding: EdgeInsets.symmetric(
@@ -300,9 +315,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         vertical: 8,
       ),
       gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
-        maxCrossAxisExtent: isMobile
-            ? 200
-            : 320, // Mobilde kartları biraz küçültüyoruz
+        maxCrossAxisExtent: isMobile ? 200 : 320,
         mainAxisExtent: isMobile ? 160 : 190,
         crossAxisSpacing: isMobile ? 12 : 20,
         mainAxisSpacing: isMobile ? 12 : 20,
@@ -335,9 +348,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       child: InkWell(
         onTap: () => _openEditor(context, note),
         child: Padding(
-          padding: const EdgeInsets.all(
-            16,
-          ), // Mobilde taşmaması için 20'den 16'ya çekildi
+          padding: const EdgeInsets.all(16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -380,8 +391,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     fontSize: 13,
                     height: 1.4,
                   ),
-                  maxLines:
-                      3, // Mobilde taşmayı önlemek için dörtten üçe düşürüldü
+                  maxLines: 3,
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
@@ -470,7 +480,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // --- AKILLI VE TAŞMAYAN SEÇİM PENCERESİ ---
   void _showNewNoteOptions(BuildContext context) {
     final double screenWidth = MediaQuery.of(context).size.width;
 
@@ -491,7 +500,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
         ),
         content: SizedBox(
-          // 🌟 TAŞMANIN ASIL ÇÖZÜMÜ: Eğer ekran 500px'den küçükse (Telefon ise) ekranın %85'ini kapla! Sabit 450px verme!
           width: screenWidth > 500 ? 450 : screenWidth * 0.85,
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -540,9 +548,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       child: InkWell(
         onTap: onTap,
         child: Container(
-          padding: const EdgeInsets.all(
-            16,
-          ), // Sıkışmaması için 20'den 16'ya çekildi
+          padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             border: Border.all(color: Colors.white10),
             borderRadius: BorderRadius.circular(12),
@@ -555,11 +561,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   color: color.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Icon(
-                  icon,
-                  color: color,
-                  size: 24,
-                ), // İkon boyutu biraz ufaltıldı
+                child: Icon(icon, color: color, size: 24),
               ),
               const SizedBox(width: 14),
               Expanded(
@@ -594,6 +596,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  String _formatDate(DateTime date) =>
-      '${date.day.toString().padLeft(2, '0')}.${date.month.toString().padLeft(2, '0')}.${date.year}';
+  String _formatDate(DateTime date) {
+    // 🌟 YENİ: UTC'den yerel saate çevirerek ekranda göster
+    final localDate = date.toLocal();
+    return '${localDate.day.toString().padLeft(2, '0')}.${localDate.month.toString().padLeft(2, '0')}.${localDate.year}';
+  }
 }
