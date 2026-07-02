@@ -8,13 +8,12 @@ class PieceTable {
 
   // --- ZAMAN MAKİNESİ (UNDO / REDO) HAFIZALARI ---
   final List<List<Piece>> _undoStack = [];
-  final List<List<Piece>> _redoStack = []; // İleri alma yığını
+  final List<List<Piece>> _redoStack = [];
   final int _maxHistorySteps = 200;
 
   bool canUndo() => _undoStack.isNotEmpty;
   bool canRedo() => _redoStack.isNotEmpty;
 
-  // Paket içi kullanım için parçaları (pieces) dışarı açıyoruz (Provider'daki resim ekleme için gerekli)
   List<Piece> get internalPieces => _pieces;
 
   PieceTable({String initialText = ''}) : _originalBuffer = initialText {
@@ -30,41 +29,31 @@ class PieceTable {
     }
   }
 
-  /// Değişiklik yapılmadan hemen önce mevcut durumu kaydeder
   void _saveSnapshot() {
     if (_undoStack.length >= _maxHistorySteps) {
       _undoStack.removeAt(0);
     }
     _undoStack.add(_pieces.map((p) => p.clone()).toList());
-
-    // Zaman çizelgesi değiştiği için ileri alma hafızası silinir
     _redoStack.clear();
   }
 
-  /// Geri Al (Undo)
   bool undo() {
     if (_undoStack.isEmpty) return false;
-    // Geriye gitmeden önce "şu anki" durumu İleri Al yığınına atıyoruz
     _redoStack.add(_pieces.map((p) => p.clone()).toList());
-    // Geçmişi yüklüyoruz
     _pieces = _undoStack.removeLast();
     return true;
   }
 
-  /// İleri Al (Redo)
   bool redo() {
     if (_redoStack.isEmpty) return false;
-    // İleriye gitmeden önce "şu anki" durumu tekrar Geri Al yığınına atıyoruz
     _undoStack.add(_pieces.map((p) => p.clone()).toList());
-    // Geleceği yüklüyoruz
     _pieces = _redoStack.removeLast();
     return true;
   }
 
   void insert(int offset, String text, [MostromoStyle? customStyle]) {
     if (text.isEmpty) return;
-
-    _saveSnapshot(); // Değişiklikten hemen önce snapshot al
+    _saveSnapshot();
 
     final int addBufferStart = _addBuffer.length;
     _addBuffer += text;
@@ -90,8 +79,7 @@ class PieceTable {
 
   void delete(int offset, int length) {
     if (length <= 0) return;
-
-    _saveSnapshot(); // Değişiklikten hemen önce snapshot al
+    _saveSnapshot();
 
     List<Piece> newPieces = [];
     int currentOffset = 0;
@@ -145,12 +133,12 @@ class PieceTable {
     bool? isUnderline,
     Color? color,
     double? fontSize,
-    String? linkUrl, // Bağlantı (Link) eklemek için
-    bool clearLink = false, // Bağlantıyı temizlemek için
+    String? fontFamily, // 🌟 YENİ: FONT PARAMETRESİ
+    String? linkUrl,
+    bool clearLink = false,
   }) {
     if (length <= 0) return;
-
-    _saveSnapshot(); // Renk/stil değişmeden hemen önce snapshot al
+    _saveSnapshot();
 
     int startIndex = _splitAt(offset);
     int endIndex = _splitAt(offset + length);
@@ -164,14 +152,12 @@ class PieceTable {
       if (isUnderline != null) piece.style!.isUnderline = isUnderline;
       if (color != null) piece.style!.color = color;
       if (fontSize != null) piece.style!.fontSize = fontSize;
-
-      // Link işlemleri
+      if (fontFamily != null) piece.style!.fontFamily = fontFamily; // 🌟 YENİ
       if (linkUrl != null) piece.style!.linkUrl = linkUrl;
       if (clearLink) piece.style!.linkUrl = null;
     }
   }
 
-  // Sadece Provider'ın erişebilmesi için paket içi (_splitAt) public yapıldı
   int splitAtForProvider(int offset) => _splitAt(offset);
 
   int _splitAt(int offset) {
@@ -230,7 +216,6 @@ class PieceTable {
         );
       }
 
-      // --- SİHİRLİ GÖRÜNMEZ KUTU (PHANTOM BOX) VE LİNK SİSTEMİ ---
       final bool hasImage = piece.style?.imageBase64 != null;
       final double letterSpacing = hasImage
           ? (piece.style!.imageWidth ?? 300.0)
@@ -244,18 +229,18 @@ class PieceTable {
         TextSpan(
           text: pieceText,
           style: TextStyle(
+            fontFamily:
+                piece.style?.fontFamily, // 🌟 YENİ: SİHİR BURADA ÇALIŞIYOR
             fontWeight: piece.style?.isBold == true
                 ? FontWeight.bold
                 : FontWeight.normal,
             fontStyle: piece.style?.isItalic == true
                 ? FontStyle.italic
                 : FontStyle.normal,
-            // Resim varsa altını çizme, link varsa altını çiz
             decoration:
                 (piece.style?.isUnderline == true || hasLink) && !hasImage
                 ? TextDecoration.underline
                 : TextDecoration.none,
-            // Resim varsa metni TAMAMEN ŞEFFAF yap (Görünmez Kutu). Değilse normal/link rengini ver.
             color: hasImage
                 ? Colors.transparent
                 : (hasLink

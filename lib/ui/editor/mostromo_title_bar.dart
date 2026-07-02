@@ -17,7 +17,6 @@ class MostromoTitleBar extends StatelessWidget {
   final VoidCallback? onSave;
   final VoidCallback onClose;
 
-  // 🌟 KORUMALI GÖRÜNÜM (READ-ONLY) PARAMETRELERİ
   final bool isExternal;
   final VoidCallback? onImport;
 
@@ -36,16 +35,14 @@ class MostromoTitleBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 1. İŞLETİM SİSTEMİNİ KONTROL ET
     final bool isDesktopOS =
         !kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
     final bool isMobile = MediaQuery.of(context).size.width < 600;
 
-    // Üst barın kendisini (Mobil veya Masaüstü) oluşturuyoruz
     Widget topBar;
 
     // ==========================================
-    // 📱 MOBİL ARAYÜZ (Senin Orijinal Kodun)
+    // 📱 MOBİL ARAYÜZ
     // ==========================================
     if (!isDesktopOS) {
       topBar = SafeArea(
@@ -55,7 +52,6 @@ class MostromoTitleBar extends StatelessWidget {
           child: Row(
             children: [
               IconButton(
-                // 🌟 DÜZELTME 1: Dışarıdan açıldıysa (Preview) Geri Oku değil Çarpı (X) çıkar
                 icon: Icon(
                   (isExternal || !isEditor)
                       ? Icons.close_rounded
@@ -65,33 +61,39 @@ class MostromoTitleBar extends StatelessWidget {
                 onPressed: onClose,
               ),
               const Spacer(),
+              // 🌟 DÜZELTME 1: Başlık artık mobilde de değiştirilebilir bir TextField!
               if (titleController != null)
                 Expanded(
-                  child: Text(
-                    titleController!.text,
+                  flex: 4,
+                  child: TextField(
+                    controller: titleController,
                     textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      color: Colors.white,
+                    readOnly: isExternal, // Sadece okunur moddaysa kilitler
+                    cursorColor: MostromoTheme.accentColor,
+                    style: TextStyle(
+                      color: isExternal ? Colors.white54 : Colors.white,
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                    decoration: const InputDecoration(
+                      border: InputBorder.none,
+                      isDense: true,
+                      contentPadding: EdgeInsets.zero,
+                    ),
                   ),
                 ),
 
-              // 🌟 DÜZELTME 2: Mobildeki "İndir" ikonunu sildik çünkü altına Altın Şerit ekleyeceğiz
               if (!isExternal && onSave != null) _buildDynamicSaveIcon(),
 
               const Spacer(),
-              const SizedBox(width: 48), // Başlığı ortalamak için boşluk
+              const SizedBox(width: 48),
             ],
           ),
         ),
       );
     }
     // ==========================================
-    // 🖥️ MASAÜSTÜ ARAYÜZÜ (Senin Orijinal Kodun + window_manager)
+    // 🖥️ MASAÜSTÜ ARAYÜZÜ
     // ==========================================
     else {
       topBar = Container(
@@ -153,7 +155,6 @@ class MostromoTitleBar extends StatelessWidget {
               ),
             ],
 
-            // 🌟 SENİN window_manager SÜRÜKLEME ALANIN
             const Expanded(child: DragToMoveArea(child: SizedBox.expand())),
 
             if (isEditor && titleController != null)
@@ -165,8 +166,7 @@ class MostromoTitleBar extends StatelessWidget {
                     child: TextField(
                       controller: titleController,
                       textAlign: TextAlign.center,
-                      readOnly:
-                          isExternal, // Dışarıdan açıldıysa başlık değiştirilemez
+                      readOnly: isExternal,
                       cursorColor: MostromoTheme.accentColor,
                       style: TextStyle(
                         color: isExternal ? Colors.white54 : Colors.white,
@@ -204,14 +204,12 @@ class MostromoTitleBar extends StatelessWidget {
                   ),
                   const SizedBox(width: 12),
 
-                  // 🌟 DÜZELTME 3: Çirkin butonu buradan sildik, sadece kendi dosyalarımızda Kaydet ikonunu gösteriyoruz.
                   if (!isExternal && onSave != null) _buildDynamicSaveIcon(),
                 ],
               ),
 
             const Expanded(child: DragToMoveArea(child: SizedBox.expand())),
 
-            // 🌟 SENİN PENCERE BUTONLARIN
             _buildWindowButton(
               Icons.minimize_rounded,
               () => windowManager.minimize(),
@@ -228,23 +226,15 @@ class MostromoTitleBar extends StatelessWidget {
       );
     }
 
-    // ==========================================
-    // 🌟 3. BİRLEŞTİRME: EĞER KORUMALI GÖRÜNÜM İSE ALTIN ŞERİDİ ALTINA EKLE
-    // ==========================================
-    if (!isExternal) {
-      return topBar; // Kendi dosyamızsa hiçbir şey eklemeden direkt döndür
-    }
+    if (!isExternal) return topBar;
 
-    // Dışarıdan geldiyse: Orijinal barı üste, altın şeridi alta koy
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [topBar, _buildProtectedViewBanner(isMobile)],
     );
   }
 
-  // -----------------------------------------------------------------
-  // YARDIMCI WIDGET'LAR
-  // -----------------------------------------------------------------
+  // --- YARDIMCI WIDGET'LAR ---
 
   Widget _buildDynamicSaveIcon() {
     if (isBlockMode) {
@@ -297,7 +287,6 @@ class MostromoTitleBar extends StatelessWidget {
     );
   }
 
-  // 🌟 YENİ: EFSANEVİ ALTIN SARISI KORUMALI GÖRÜNÜM ŞERİDİ
   Widget _buildProtectedViewBanner(bool isMobile) {
     return Container(
       width: double.infinity,

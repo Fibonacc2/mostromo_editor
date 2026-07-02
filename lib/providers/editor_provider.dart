@@ -1,6 +1,10 @@
 import 'dart:convert';
-import 'dart:ui' as ui; // Resim (Image) işlemleri için
+import 'dart:io';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:file_picker/file_picker.dart';
 import 'dart:math' as math;
 import '../engine/piece_table.dart';
 import '../engine/piece.dart';
@@ -16,7 +20,15 @@ class EditorProvider extends ChangeNotifier {
   bool _isUnderline = false;
   Color? _currentColor;
   double? _currentFontSize = 16.0;
-  String? _currentLinkUrl; // YENİ: Seçili alandaki link hafızası
+  String? _currentLinkUrl;
+  String? _currentFontFamily;
+
+  List<String> loadedFonts = [
+    'Sistem Varsayılanı',
+    'Roboto',
+    'Times New Roman',
+    'Courier',
+  ];
 
   int cursorIndex = 0;
   int? selectionBase;
@@ -27,13 +39,13 @@ class EditorProvider extends ChangeNotifier {
   Color? get currentColor => _currentColor;
   double? get currentFontSize => _currentFontSize;
   String? get currentLinkUrl => _currentLinkUrl;
+  String? get currentFontFamily => _currentFontFamily;
+
+  bool _isDirty = false;
+  bool get isDirty => _isDirty;
 
   bool get hasSelection =>
       selectionBase != null && selectionBase != cursorIndex;
-
-  // --- KAYIT DURUMU (DIRTY STATE) ---
-  bool _isDirty = false;
-  bool get isDirty => _isDirty;
 
   void markAsSaved() {
     _isDirty = false;
@@ -47,8 +59,7 @@ class EditorProvider extends ChangeNotifier {
     }
   }
 
-  // --- Şerit (Ribbon) Sekme Durumu ---
-  int _activeTab = 0; // 0: Giriş, 1: Ekle, 2: Düzen
+  int _activeTab = 0;
   int get activeTab => _activeTab;
 
   void setActiveTab(int index) {
@@ -56,7 +67,6 @@ class EditorProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // --- Sayfa Düzeni (Page Mode) ve Kenarlıklar ---
   bool _isPageMode = false;
   bool get isPageMode => _isPageMode;
 
@@ -97,11 +107,9 @@ class EditorProvider extends ChangeNotifier {
     return 0;
   }
 
-  // --- RESİM ÖNBELLEĞİ (IMAGE CACHE) ---
   final Map<int, ui.Image> _imageCache = {};
   Map<int, ui.Image> get imageCache => _imageCache;
 
-  // --- BAŞLATMA VE VERİ YÖNETİMİ ---
   void initialize(String mroDataOrText) {
     try {
       final Map<String, dynamic> jsonMap = jsonDecode(mroDataOrText);
@@ -118,8 +126,6 @@ class EditorProvider extends ChangeNotifier {
     cursorIndex = engine.getText().length;
     selectionBase = null;
     _syncToolbarWithCursor();
-
-    // Motor başlatıldığında metnin içindeki tüm resimleri bul ve belleğe al (Asenkron)
     preloadImages();
   }
 
@@ -133,8 +139,6 @@ class EditorProvider extends ChangeNotifier {
     return data;
   }
 
-  // --- RESİM VE EKLENTİ İŞLEMLERİ (GÖRÜNMEZ KUTU HACKİ) ---
-
   Future<void> _decodeAndCacheImage(int offset, String base64Str) async {
     if (_imageCache.containsKey(offset)) return;
     try {
@@ -142,7 +146,7 @@ class EditorProvider extends ChangeNotifier {
       final codec = await ui.instantiateImageCodec(bytes);
       final frameInfo = await codec.getNextFrame();
       _imageCache[offset] = frameInfo.image;
-      notifyListeners(); // Resim çözüldüğünde tuvali yenile
+      notifyListeners();
     } catch (e) {
       debugPrint("Resim yükleme hatası: $e");
     }
@@ -159,12 +163,8 @@ class EditorProvider extends ChangeNotifier {
   }
 
   void insertImage(String base64Str, double width, double height) {
-    // 1. Resmin yerini tutacak şeffaf (görünmez) bir boşluk ekle
     insertText('\u200B');
-
     int targetIndex = cursorIndex - 1;
-
-    // 2. PieceTable'a gidip o spesifik karakterin arkasına resmi gömüyoruz
     int startIndex = engine.splitAtForProvider(targetIndex);
     int endIndex = engine.splitAtForProvider(targetIndex + 1);
 
@@ -176,9 +176,7 @@ class EditorProvider extends ChangeNotifier {
       piece.style!.imageHeight = height;
     }
 
-    // 3. Resmi anında çözümleyip belleğe al
     _decodeAndCacheImage(targetIndex, base64Str);
-
     setDirty();
     notifyListeners();
   }
@@ -186,7 +184,6 @@ class EditorProvider extends ChangeNotifier {
   void insertDivider() {
     String divider = '\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
     insertText(divider);
-    // Çizgiyi standart metinden ayırmak için saydam/gri yap
     engine.formatText(
       cursorIndex - divider.length,
       divider.length,
@@ -195,8 +192,6 @@ class EditorProvider extends ChangeNotifier {
     setDirty();
     notifyListeners();
   }
-
-  // --- BAĞLANTI (LİNK) İŞLEMLERİ ---
 
   void applyLink(String url) {
     if (hasSelection) {
@@ -220,8 +215,6 @@ class EditorProvider extends ChangeNotifier {
     }
   }
 
-  // --- İMLEÇ VE TOOLBAR SENKRONİZASYONU ---
-
   void _syncToolbarWithCursor() {
     if (hasSelection) {
       int start = math.min(selectionBase!, cursorIndex);
@@ -233,6 +226,7 @@ class EditorProvider extends ChangeNotifier {
       _isUnderline = firstStyle.isUnderline;
       _currentColor = firstStyle.color;
       _currentLinkUrl = firstStyle.linkUrl;
+      _currentFontFamily = firstStyle.fontFamily;
 
       double? firstSize;
       bool isMixed = false;
@@ -257,6 +251,7 @@ class EditorProvider extends ChangeNotifier {
       _currentColor = currentStyle.color;
       _currentFontSize = currentStyle.fontSize ?? 16.0;
       _currentLinkUrl = currentStyle.linkUrl;
+      _currentFontFamily = currentStyle.fontFamily;
     }
   }
 
@@ -272,7 +267,38 @@ class EditorProvider extends ChangeNotifier {
     }
   }
 
-  // --- DİNAMİK DURUM ÇUBUĞU (STATUS BAR) METOTLARI ---
+  // 🌟 YENİ: ÇİFT TIKLAMA VEYA BASILI TUTMA İLE KELİME SEÇME MOTORU
+  void selectWordAt(int index) {
+    String text = engine.getText();
+    if (text.isEmpty) return;
+
+    int safeIndex = index.clamp(0, text.length - 1);
+
+    // Eğer boşluğa veya noktalama işaretine tıkladıysa kelime seçme, sadece imleci koy
+    if (RegExp(r'\s').hasMatch(text[safeIndex])) {
+      updateSelection(safeIndex, null);
+      return;
+    }
+
+    int start = safeIndex;
+    int end = safeIndex;
+
+    // Sola doğru kelimenin başını bul
+    while (start > 0 &&
+        !RegExp(r'[\s.,!?;:()[\]{}<>"' + "'" + ']').hasMatch(text[start - 1])) {
+      start--;
+    }
+
+    // Sağa doğru kelimenin sonunu bul
+    while (end < text.length &&
+        !RegExp(r'[\s.,!?;:()[\]{}<>"' + "'" + ']').hasMatch(text[end])) {
+      end++;
+    }
+
+    if (start != end) {
+      updateSelection(end, start);
+    }
+  }
 
   int get currentLine {
     String text = engine.getText();
@@ -298,18 +324,13 @@ class EditorProvider extends ChangeNotifier {
     return text.split(RegExp(r'\s+')).length;
   }
 
-  // --- METİN DÜZENLEME ---
-
   void deleteSelection() {
     if (!hasSelection) return;
     int start = math.min(selectionBase!, cursorIndex);
     int end = math.max(selectionBase!, cursorIndex);
 
-    // Eğer sildiğimiz alanın içinde resim varsa önbellekten temizle
     for (int i = start; i < end; i++) {
-      if (_imageCache.containsKey(i)) {
-        _imageCache.remove(i);
-      }
+      if (_imageCache.containsKey(i)) _imageCache.remove(i);
     }
 
     engine.delete(start, end - start);
@@ -330,7 +351,8 @@ class EditorProvider extends ChangeNotifier {
         isUnderline: _isUnderline,
         color: _currentColor,
         fontSize: _currentFontSize,
-        linkUrl: _currentLinkUrl, // Linki devam ettir
+        linkUrl: _currentLinkUrl,
+        fontFamily: _currentFontFamily,
       ),
     );
     cursorIndex += text.length;
@@ -343,10 +365,7 @@ class EditorProvider extends ChangeNotifier {
       deleteSelection();
     } else if (cursorIndex > 0) {
       int targetIndex = cursorIndex - 1;
-      // Eğer sildiğimiz karakter resim (\u200B) ise belleği temizle
-      if (_imageCache.containsKey(targetIndex)) {
-        _imageCache.remove(targetIndex);
-      }
+      if (_imageCache.containsKey(targetIndex)) _imageCache.remove(targetIndex);
       engine.delete(targetIndex, 1);
       cursorIndex--;
       _syncToolbarWithCursor();
@@ -356,25 +375,9 @@ class EditorProvider extends ChangeNotifier {
   }
 
   void executeUndo() {
-    final bool success = engine.undo();
-    if (success) {
-      if (cursorIndex > engine.getText().length) {
+    if (engine.undo()) {
+      if (cursorIndex > engine.getText().length)
         cursorIndex = engine.getText().length;
-      }
-      selectionBase = null;
-      _syncToolbarWithCursor();
-      preloadImages(); // Zaman yolculuğunda eski resimler geri gelirse çöz
-      setDirty();
-      notifyListeners();
-    }
-  }
-
-  void executeRedo() {
-    final bool success = engine.redo();
-    if (success) {
-      if (cursorIndex > engine.getText().length) {
-        cursorIndex = engine.getText().length;
-      }
       selectionBase = null;
       _syncToolbarWithCursor();
       preloadImages();
@@ -383,7 +386,17 @@ class EditorProvider extends ChangeNotifier {
     }
   }
 
-  // --- ZENGİN METİN FORMATLAMA ---
+  void executeRedo() {
+    if (engine.redo()) {
+      if (cursorIndex > engine.getText().length)
+        cursorIndex = engine.getText().length;
+      selectionBase = null;
+      _syncToolbarWithCursor();
+      preloadImages();
+      setDirty();
+      notifyListeners();
+    }
+  }
 
   void _applyFormatToSelection({
     bool? bold,
@@ -391,6 +404,7 @@ class EditorProvider extends ChangeNotifier {
     bool? underline,
     Color? color,
     double? fontSize,
+    String? fontFamily,
   }) {
     if (!hasSelection) return;
     int start = math.min(selectionBase!, cursorIndex);
@@ -403,6 +417,7 @@ class EditorProvider extends ChangeNotifier {
       isUnderline: underline,
       color: color,
       fontSize: fontSize,
+      fontFamily: fontFamily,
     );
     setDirty();
   }
@@ -431,6 +446,59 @@ class EditorProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  void applyFontFamily(String family) {
+    String? finalFamily = family == 'Sistem Varsayılanı' ? null : family;
+
+    if (hasSelection) {
+      _applyFormatToSelection(fontFamily: finalFamily);
+      _syncToolbarWithCursor();
+    } else {
+      _currentFontFamily = finalFamily;
+    }
+    setDirty();
+    notifyListeners();
+  }
+
+  Future<void> pickAndLoadCustomFont(BuildContext context) async {
+    try {
+      FilePickerResult? result = await FilePicker.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['ttf', 'otf'],
+      );
+
+      if (result != null) {
+        final file = result.files.single;
+        final fontName = file.name.split('.').first;
+        Uint8List fontBytes;
+
+        if (kIsWeb) {
+          fontBytes = file.bytes!;
+        } else {
+          fontBytes = await File(file.path!).readAsBytes();
+        }
+
+        final fontLoader = FontLoader(fontName);
+        fontLoader.addFont(Future.value(ByteData.view(fontBytes.buffer)));
+        await fontLoader.load();
+
+        if (!loadedFonts.contains(fontName)) {
+          loadedFonts.add(fontName);
+        }
+        applyFontFamily(fontName);
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('"$fontName" fontu başarıyla yüklendi ve uygulandı!'),
+          ),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Font yüklenirken bir hata oluştu.')),
+      );
+    }
+  }
+
   void applyHeading(int level) {
     double size = 16.0;
     bool bold = false;
@@ -455,7 +523,6 @@ class EditorProvider extends ChangeNotifier {
       int start =
           text.lastIndexOf('\n', cursorIndex > 0 ? cursorIndex - 1 : 0) + 1;
       if (start < 0) start = 0;
-
       int end = text.indexOf('\n', cursorIndex);
       if (end == -1) end = text.length;
 

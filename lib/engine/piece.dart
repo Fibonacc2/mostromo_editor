@@ -8,8 +8,11 @@ class MostromoStyle {
   double? fontSize;
   String? linkUrl;
 
-  // --- YENİ: RESİM VERİLERİ ---
-  String? imageBase64; // Resmi metin dosyasında saklamak için Base64 formatı
+  // 🌟 YENİ: FONT AİLESİ
+  String? fontFamily;
+
+  // --- RESİM VERİLERİ ---
+  String? imageBase64;
   double? imageWidth;
   double? imageHeight;
 
@@ -20,6 +23,7 @@ class MostromoStyle {
     this.color,
     this.fontSize,
     this.linkUrl,
+    this.fontFamily, // 🌟 YENİ
     this.imageBase64,
     this.imageWidth,
     this.imageHeight,
@@ -33,6 +37,7 @@ class MostromoStyle {
       color: color,
       fontSize: fontSize,
       linkUrl: linkUrl,
+      fontFamily: fontFamily, // 🌟 YENİ
       imageBase64: imageBase64,
       imageWidth: imageWidth,
       imageHeight: imageHeight,
@@ -47,7 +52,8 @@ class MostromoStyle {
       'c': color?.toARGB32(),
       'fs': fontSize,
       'l': linkUrl,
-      'img': imageBase64, // Kısa anahtar (img)
+      'ff': fontFamily, // 🌟 YENİ: JSON kısaltması
+      'img': imageBase64,
       'iw': imageWidth,
       'ih': imageHeight,
     };
@@ -61,6 +67,7 @@ class MostromoStyle {
       color: json['c'] != null ? Color(json['c']) : null,
       fontSize: json['fs']?.toDouble(),
       linkUrl: json['l'],
+      fontFamily: json['ff'], // 🌟 YENİ
       imageBase64: json['img'],
       imageWidth: json['iw']?.toDouble(),
       imageHeight: json['ih']?.toDouble(),
@@ -92,15 +99,8 @@ class Piece {
     );
   }
 
-  // --- JSON DÖNÜŞÜMLERİ ---
-
   Map<String, dynamic> toJson() {
-    return {
-      't': buffer.index, // 0: original, 1: add
-      's': start,
-      'l': length,
-      'sty': style?.toJson(), // Stili de iç içe JSON yapıyoruz
-    };
+    return {'t': buffer.index, 's': start, 'l': length, 'sty': style?.toJson()};
   }
 
   factory Piece.fromJson(Map<String, dynamic> json) {

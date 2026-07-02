@@ -28,8 +28,8 @@ class EditorToolbar extends StatelessWidget {
 
           // 2. Kısım: SEKME İÇERİĞİ (RIBBON CONTENT)
           Container(
-            height: 48, // Şerit yüksekliği
-            width: double.infinity, // Ekranı tam kaplaması için
+            height: 48,
+            width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: AnimatedSwitcher(
               duration: const Duration(milliseconds: 200),
@@ -41,7 +41,6 @@ class EditorToolbar extends StatelessWidget {
     );
   }
 
-  // --- SEKMELERİ ÇİZEN BÖLÜM ---
   Widget _buildTabBar(EditorProvider provider) {
     return Container(
       width: double.infinity,
@@ -49,7 +48,6 @@ class EditorToolbar extends StatelessWidget {
       decoration: const BoxDecoration(
         border: Border(bottom: BorderSide(color: Colors.white10, width: 1)),
       ),
-      // 🌟 YENİ: Sekmeler sığmazsa diye yatay kaydırma koruması eklendi
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: Row(
@@ -89,7 +87,6 @@ class EditorToolbar extends StatelessWidget {
     );
   }
 
-  // --- SEKME İÇERİKLERİ ---
   Widget _buildTabContent(BuildContext context, EditorProvider provider) {
     switch (provider.activeTab) {
       case 0:
@@ -103,17 +100,20 @@ class EditorToolbar extends StatelessWidget {
     }
   }
 
-  // SEKME 1: GİRİŞ (Metin, Font, Stil, Renk)
+  // SEKME 1: GİRİŞ
   Widget _buildHomeTab(BuildContext context, EditorProvider provider) {
     return SizedBox(
       key: const ValueKey('tab_home'),
       width: double.infinity,
-      // 🌟 YENİ: İçerik taşarsa parmakla sağa-sola kaydırılsın
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: Row(
           children: [
             _buildStyleDropdown(provider),
+            _buildDivider(),
+
+            // Font Seçici ve Yükleyici Menüsü
+            _buildFontFamilyDropdown(context, provider),
             _buildDivider(),
 
             _buildFontSizeDropdown(provider),
@@ -143,12 +143,11 @@ class EditorToolbar extends StatelessWidget {
     );
   }
 
-  // SEKME 2: EKLE (Resim, Tablo, Ayırıcı, Link)
+  // SEKME 2: EKLE
   Widget _buildInsertTab(BuildContext context, EditorProvider provider) {
     return SizedBox(
       key: const ValueKey('tab_insert'),
       width: double.infinity,
-      // 🌟 YENİ: Yatay kaydırma koruması
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: Row(
@@ -191,12 +190,11 @@ class EditorToolbar extends StatelessWidget {
     );
   }
 
-  // SEKME 3: DÜZEN (Sayfa Ayarları, Kenarlıklar)
+  // SEKME 3: DÜZEN
   Widget _buildLayoutTab(BuildContext context, EditorProvider provider) {
     return SizedBox(
       key: const ValueKey('tab_layout'),
       width: double.infinity,
-      // 🌟 YENİ: Yatay kaydırma koruması
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: Row(
@@ -221,83 +219,107 @@ class EditorToolbar extends StatelessWidget {
     );
   }
 
-  // --- BAĞLANTI (LİNK) EKRANI ---
-  void _showLinkDialog(BuildContext context, EditorProvider provider) {
-    if (!provider.hasSelection && provider.currentLinkUrl == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Bağlantı eklemek için önce metin seçmelisiniz.'),
-        ),
-      );
-      return;
-    }
+  // --- KOMPONENTLER ---
 
-    final urlCtrl = TextEditingController(
-      text: provider.currentLinkUrl ?? 'https://',
-    );
+  // 🌟 DÜZELTİLEN KISIM: FONT SEÇİCİ
+  Widget _buildFontFamilyDropdown(
+    BuildContext context,
+    EditorProvider provider,
+  ) {
+    final currentFont = provider.currentFontFamily ?? 'Sistem Varsayılanı';
 
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1E1E1E),
-        title: const Text(
-          'Bağlantı (URL)',
-          style: TextStyle(color: Colors.white, fontSize: 16),
-        ),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-          side: const BorderSide(color: Colors.white10),
-        ),
-        content: TextField(
-          controller: urlCtrl,
-          style: const TextStyle(color: Colors.blueAccent),
-          decoration: InputDecoration(
-            filled: true,
-            fillColor: Colors.black26,
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(6),
-              borderSide: BorderSide.none,
-            ),
-          ),
-        ),
-        actions: [
-          if (provider.currentLinkUrl != null)
-            TextButton(
-              onPressed: () {
-                provider.removeLink();
-                Navigator.pop(context);
-              },
-              child: const Text(
-                'Bağlantıyı Kaldır',
-                style: TextStyle(color: Colors.redAccent),
+    return PopupMenuButton<String>(
+      tooltip: 'Yazı Tipi (Font)',
+      color: const Color(0xFF2A2A2A),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      onSelected: (font) {
+        if (font == 'UPLOAD_NEW_FONT') {
+          provider.pickAndLoadCustomFont(context);
+        } else {
+          provider.applyFontFamily(font);
+        }
+      },
+      itemBuilder: (context) {
+        // 🌟 ÇÖZÜM BURADA: Listeyi açıkça "PopupMenuEntry" olarak tanımlıyoruz ki hem item hem divider alabilsin.
+        List<PopupMenuEntry<String>> items = [];
+
+        for (String font in provider.loadedFonts) {
+          items.add(
+            PopupMenuItem<String>(
+              value: font,
+              height: 36,
+              child: Text(
+                font,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontFamily: font == 'Sistem Varsayılanı' ? null : font,
+                ),
               ),
             ),
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('İptal', style: TextStyle(color: Colors.white54)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: MostromoTheme.accentColor,
+          );
+        }
+
+        items.add(const PopupMenuDivider());
+        items.add(
+          const PopupMenuItem<String>(
+            value: 'UPLOAD_NEW_FONT',
+            height: 36,
+            child: Row(
+              children: [
+                Icon(
+                  Icons.add_circle_outline_rounded,
+                  color: MostromoTheme.accentColor,
+                  size: 18,
+                ),
+                SizedBox(width: 8),
+                Text(
+                  "Özel Font Yükle (.ttf)",
+                  style: TextStyle(
+                    color: MostromoTheme.accentColor,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                  ),
+                ),
+              ],
             ),
-            onPressed: () {
-              if (urlCtrl.text.isNotEmpty) provider.applyLink(urlCtrl.text);
-              Navigator.pop(context);
-            },
-            child: const Text(
-              'Uygula',
-              style: TextStyle(
-                color: Colors.black,
-                fontWeight: FontWeight.bold,
+          ),
+        );
+        return items;
+      },
+      child: Container(
+        width: 140,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: const Color(0xFF2A2A2A),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Expanded(
+              child: Text(
+                currentFont,
+                style: TextStyle(
+                  color: MostromoTheme.textPrimary,
+                  fontSize: 13,
+                  fontFamily: currentFont == 'Sistem Varsayılanı'
+                      ? null
+                      : currentFont,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
-          ),
-        ],
+            const Icon(
+              Icons.arrow_drop_down,
+              color: MostromoTheme.textSecondary,
+              size: 16,
+            ),
+          ],
+        ),
       ),
     );
   }
-
-  // --- KOMPONENTLER (Görsel Araçlar) ---
 
   Widget _buildStyleDropdown(EditorProvider provider) {
     final Map<int, String> styles = {
@@ -498,9 +520,7 @@ class EditorToolbar extends StatelessWidget {
             content: SingleChildScrollView(
               child: BlockPicker(
                 pickerColor: pickerColor,
-                onColorChanged: (color) {
-                  pickerColor = color;
-                },
+                onColorChanged: (color) => pickerColor = color,
               ),
             ),
             actions: [
@@ -547,7 +567,6 @@ class EditorToolbar extends StatelessWidget {
     );
   }
 
-  // --- KENARLIK (MARGIN) AYAR PENCERESİ ---
   void _showMarginDialog(BuildContext context, EditorProvider provider) {
     final topCtrl = TextEditingController(
       text: provider.marginTop.toInt().toString(),
@@ -641,6 +660,81 @@ class EditorToolbar extends StatelessWidget {
                   borderRadius: BorderRadius.circular(6),
                   borderSide: BorderSide.none,
                 ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showLinkDialog(BuildContext context, EditorProvider provider) {
+    if (!provider.hasSelection && provider.currentLinkUrl == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Bağlantı eklemek için önce metin seçmelisiniz.'),
+        ),
+      );
+      return;
+    }
+
+    final urlCtrl = TextEditingController(
+      text: provider.currentLinkUrl ?? 'https://',
+    );
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E1E),
+        title: const Text(
+          'Bağlantı (URL)',
+          style: TextStyle(color: Colors.white, fontSize: 16),
+        ),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: const BorderSide(color: Colors.white10),
+        ),
+        content: TextField(
+          controller: urlCtrl,
+          style: const TextStyle(color: Colors.blueAccent),
+          decoration: InputDecoration(
+            filled: true,
+            fillColor: Colors.black26,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(6),
+              borderSide: BorderSide.none,
+            ),
+          ),
+        ),
+        actions: [
+          if (provider.currentLinkUrl != null)
+            TextButton(
+              onPressed: () {
+                provider.removeLink();
+                Navigator.pop(context);
+              },
+              child: const Text(
+                'Bağlantıyı Kaldır',
+                style: TextStyle(color: Colors.redAccent),
+              ),
+            ),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('İptal', style: TextStyle(color: Colors.white54)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: MostromoTheme.accentColor,
+            ),
+            onPressed: () {
+              if (urlCtrl.text.isNotEmpty) provider.applyLink(urlCtrl.text);
+              Navigator.pop(context);
+            },
+            child: const Text(
+              'Uygula',
+              style: TextStyle(
+                color: Colors.black,
+                fontWeight: FontWeight.bold,
               ),
             ),
           ),
