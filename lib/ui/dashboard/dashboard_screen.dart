@@ -17,7 +17,6 @@ class DashboardScreen extends StatefulWidget {
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
-// 🌟 YENİ: WidgetsBindingObserver eklendi (Uygulamanın uykuya dalmasını dinlemek için)
 class _DashboardScreenState extends State<DashboardScreen>
     with WidgetsBindingObserver {
   bool _isGridView = true;
@@ -28,24 +27,25 @@ class _DashboardScreenState extends State<DashboardScreen>
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this); // 🌟 Dinleyiciyi başlat
+    WidgetsBinding.instance.addObserver(this);
+
+    CloudSyncService.onSyncCompleted.addListener(_loadNotesFromDisk);
 
     _loadNotesFromDisk();
-    _runCloudSync();
+    CloudSyncService.syncAllNotes();
     _listenForFileIntents();
   }
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this); // 🌟 Dinleyiciyi yok et
+    CloudSyncService.onSyncCompleted.removeListener(_loadNotesFromDisk);
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
-  // 🌟 YENİ: KULLANICI UYGULAMAYI ARKA PLANA ATTIĞINDA ÇALIŞIR (KATMAN 3)
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused ||
-        state == AppLifecycleState.inactive) {
+    if (state == AppLifecycleState.paused) {
       debugPrint(
         "💤 Uygulama arka plana atıldı. Postacı (Sync) son kez çalıştırılıyor...",
       );
@@ -53,18 +53,13 @@ class _DashboardScreenState extends State<DashboardScreen>
     }
   }
 
-  Future<void> _runCloudSync() async {
-    await CloudSyncService.syncAllNotes();
-    if (mounted) {
-      _loadNotesFromDisk();
-    }
-  }
-
   Future<void> _loadNotesFromDisk() async {
     final notes = await LocalStorageService.loadAllNotes();
-    setState(() {
-      _notes = notes;
-    });
+    if (mounted) {
+      setState(() {
+        _notes = notes;
+      });
+    }
   }
 
   void _listenForFileIntents() async {
@@ -93,20 +88,12 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
-  // 🌟 GÜNCELLENDİ: ARTIK KÖRÜ KÖRÜNE YÜKLEME YOK, POSTACI ÇAĞRILIYOR
+  // 🌟 KİLİT ÇÖZÜM 2: Ctrl+S ile veya Sessiz Kayıt ile diske yazılmışsa, "null" dönse bile eşitlemeyi çalıştır!
   void _handleReturnedNote(dynamic returnedNote) async {
-    if (returnedNote != null && returnedNote is MostromoNote) {
-      // EditorScreen zaten diske kaydetti, biz sadece listeyi yenileyip Postacıyı dürtüyoruz.
-      _loadNotesFromDisk();
-
-      // 🌟 YENİ: Sadece bu dosyayı değil, tüm sistemi akıllıca kontrol et (Hash Kalkanı vs.)
-      CloudSyncService.syncAllNotes().then((_) {
-        if (mounted) _loadNotesFromDisk();
-      });
-    } else {
-      // Değişiklik yapılmadan (Sıfır yer değiştirme) dönülmüşse bile listeyi yenile
-      _loadNotesFromDisk();
-    }
+    // Döndürülen değerin ne olduğunun hiçbir önemi yok. Kullanıcı editörden çıktığı an
+    // yerel diski okuyacağız ve KESİNLİKLE Postacıyı (Sync) yola çıkartacağız.
+    await _loadNotesFromDisk();
+    CloudSyncService.syncAllNotes();
   }
 
   void _openEditor(BuildContext context, [MostromoNote? existingNote]) async {
@@ -597,7 +584,6 @@ class _DashboardScreenState extends State<DashboardScreen>
   }
 
   String _formatDate(DateTime date) {
-    // 🌟 YENİ: UTC'den yerel saate çevirerek ekranda göster
     final localDate = date.toLocal();
     return '${localDate.day.toString().padLeft(2, '0')}.${localDate.month.toString().padLeft(2, '0')}.${localDate.year}';
   }

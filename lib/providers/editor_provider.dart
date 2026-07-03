@@ -63,8 +63,12 @@ class EditorProvider extends ChangeNotifier {
     }
   }
 
+  // 🌟 KİLİT ÇÖZÜM 1: Sadece düz metni değil, tüm biçimlendirmeleri (JSON) hashe dahil et!
   String _calculateCurrentHash() {
-    return SyncUtils.generateHash(_documentTitle, engine.getText());
+    return SyncUtils.generateHash(
+      _documentTitle,
+      jsonEncode(generateMroData()),
+    );
   }
 
   void attemptLocalSave() {
@@ -553,7 +557,7 @@ class EditorProvider extends ChangeNotifier {
         fontLoader.addFont(Future.value(ByteData.view(fontBytes.buffer)));
         await fontLoader.load();
 
-        if (!context.mounted) return; // 🌟 GÜVENLİK AĞI
+        if (!context.mounted) return;
 
         if (!loadedFonts.contains(fontName)) {
           loadedFonts.add(fontName);
@@ -567,7 +571,7 @@ class EditorProvider extends ChangeNotifier {
         );
       }
     } catch (e) {
-      if (!context.mounted) return; // 🌟 GÜVENLİK AĞI
+      if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Font yüklenirken bir hata oluştu.')),
       );

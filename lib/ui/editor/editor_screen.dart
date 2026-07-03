@@ -136,7 +136,7 @@ class _EditorScreenState extends State<EditorScreen> {
     }
   }
 
-  void _saveAndClose() {
+  Future<void> _saveAndClose() async {
     if (_isReadOnly) {
       Navigator.pop(context, null);
       return;
@@ -161,10 +161,12 @@ class _EditorScreenState extends State<EditorScreen> {
         lastUpdated: DateTime.now().toUtc(), // 🌟 UTC
         isSynced: false, // 🌟 POSTACI İÇİN
       );
-      Navigator.pop(context, updatedNote);
+      // 🌟 KOPUK KABLO BURASIYDI: Panele dönmeden hemen önce DİSKE YAZIYORUZ!
+      await LocalStorageService.saveNote(updatedNote);
+
+      if (mounted) Navigator.pop(context, updatedNote);
     } else {
-      // Değişiklik yoksa boş dön, Dashboard boşuna diske yazmasın
-      Navigator.pop(context, null);
+      if (mounted) Navigator.pop(context, null);
     }
   }
 

@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'dart:math' as math;
 import 'dart:async';
@@ -9,6 +8,8 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import '../providers/editor_provider.dart';
 import 'page_layout.dart';
 import 'editor_painter.dart';
+import 'editor_keyboard_handler.dart';
+import '../ui/editor/editor_menus.dart'; // Yeni menü sistemimiz
 
 enum DragHandle { none, left, right }
 
@@ -42,15 +43,27 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
   TextPainter? _cachedTextPainter;
   PageLayout? _cachedLayout;
 
+  OverlayEntry? _miniToolbarEntry;
+  Offset? _lastPanGlobalPos;
+
   @override
   void initState() {
     super.initState();
     _focusNode = FocusNode(
       onKeyEvent: (node, event) {
-        if (!mounted) {
-          return KeyEventResult.ignored;
-        }
-        bool handled = _handleKeyEvent(event, context.read<EditorProvider>());
+        if (!mounted) return KeyEventResult.ignored;
+        // 🌟 KISAYOLLAR ARTIK AYRI DOSYADAN ÇAĞRILIYOR
+        bool handled = EditorKeyboardHandler.handle(
+          event,
+          context.read<EditorProvider>(),
+          onSave: () => widget.onSave?.call(),
+          onHideMiniToolbar: _hideMiniToolbar,
+          onStartBlinking: _startBlinking,
+          onResetIme: _resetIme,
+          onClearIntendedX: () => _intendedCursorX = null,
+          onCalculateVerticalMove: (isUp) =>
+              _calculateVerticalMove(context.read<EditorProvider>(), isUp),
+        );
         return handled ? KeyEventResult.handled : KeyEventResult.ignored;
       },
     );
@@ -60,23 +73,38 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
         _startBlinking();
       } else {
         _cursorTimer?.cancel();
-        if (mounted) {
-          setState(() => _showCursor = false);
-        }
+        if (mounted) setState(() => _showCursor = false);
       }
     });
 
-    if (widget.isActive) {
-      _startBlinking();
-    }
+    if (widget.isActive) _startBlinking();
   }
 
   @override
   void dispose() {
+    _hideMiniToolbar();
     _focusNode.dispose();
     _cursorTimer?.cancel();
     _imeController.dispose();
     super.dispose();
+  }
+
+  void _hideMiniToolbar() {
+    if (_miniToolbarEntry != null) {
+      _miniToolbarEntry!.remove();
+      _miniToolbarEntry = null;
+    }
+  }
+
+  void _showMiniToolbarWrapper(Offset globalPos, EditorProvider provider) {
+    _hideMiniToolbar();
+    // 🌟 MENÜLER ARTIK AYRI DOSYADAN ÇAĞRILIYOR
+    _miniToolbarEntry = EditorMenus.showMiniToolbar(
+      context,
+      globalPos,
+      provider,
+      _hideMiniToolbar,
+    );
   }
 
   void _startBlinking() {
@@ -100,9 +128,8 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
   }
 
   void _onImeChanged(String value, EditorProvider provider) {
-    if (_isImeUpdating) {
-      return;
-    }
+    if (_isImeUpdating) return;
+    _hideMiniToolbar();
 
     if (value.startsWith(_previousImeText)) {
       String added = value.substring(_previousImeText.length);
@@ -130,251 +157,6 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
     _startBlinking();
   }
 
-  void _showContextMenu(
-    BuildContext context,
-    Offset globalPosition,
-    EditorProvider provider,
-  ) async {
-    double menuY = globalPosition.dy + 45;
-
-    final value = await showMenu<String>(
-      context: context,
-      position: RelativeRect.fromLTRB(
-        globalPosition.dx - 50,
-        menuY,
-        globalPosition.dx + 50,
-        menuY,
-      ),
-      color: const Color(0xFF2A2A2A),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      items: [
-        if (provider.hasSelection)
-          PopupMenuItem(
-            value: 'cut',
-            child: Row(
-              children: const [
-                Icon(Icons.cut_rounded, color: Colors.white70, size: 20),
-                SizedBox(width: 12),
-                Text('Kes', style: TextStyle(color: Colors.white)),
-              ],
-            ),
-          ),
-        if (provider.hasSelection)
-          PopupMenuItem(
-            value: 'copy',
-            child: Row(
-              children: const [
-                Icon(Icons.copy_rounded, color: Colors.white70, size: 20),
-                SizedBox(width: 12),
-                Text('Kopyala', style: TextStyle(color: Colors.white)),
-              ],
-            ),
-          ),
-
-        PopupMenuItem(
-          value: 'paste',
-          child: Row(
-            children: const [
-              Icon(Icons.paste_rounded, color: Colors.white70, size: 20),
-              SizedBox(width: 12),
-              Text('Yapıştır', style: TextStyle(color: Colors.white)),
-            ],
-          ),
-        ),
-        const PopupMenuDivider(height: 1),
-        PopupMenuItem(
-          value: 'select_all',
-          child: Row(
-            children: const [
-              Icon(Icons.select_all_rounded, color: Colors.white70, size: 20),
-              SizedBox(width: 12),
-              Text('Tümünü Seç', style: TextStyle(color: Colors.white)),
-            ],
-          ),
-        ),
-
-        if (provider.hasSelection) const PopupMenuDivider(height: 1),
-        if (provider.hasSelection)
-          PopupMenuItem(
-            value: 'bold',
-            child: Row(
-              children: const [
-                Icon(
-                  Icons.format_bold_rounded,
-                  color: Colors.white70,
-                  size: 20,
-                ),
-                SizedBox(width: 12),
-                Text('Kalın Yap', style: TextStyle(color: Colors.white)),
-              ],
-            ),
-          ),
-        if (provider.hasSelection)
-          PopupMenuItem(
-            value: 'italic',
-            child: Row(
-              children: const [
-                Icon(
-                  Icons.format_italic_rounded,
-                  color: Colors.white70,
-                  size: 20,
-                ),
-                SizedBox(width: 12),
-                Text('İtalik Yap', style: TextStyle(color: Colors.white)),
-              ],
-            ),
-          ),
-      ],
-    );
-
-    if (value == 'copy' && provider.hasSelection) {
-      final start = math.min(provider.selectionBase!, provider.cursorIndex);
-      final end = math.max(provider.selectionBase!, provider.cursorIndex);
-      Clipboard.setData(
-        ClipboardData(text: provider.engine.getText().substring(start, end)),
-      );
-      provider.updateSelection(provider.cursorIndex, null);
-    } else if (value == 'cut' && provider.hasSelection) {
-      final start = math.min(provider.selectionBase!, provider.cursorIndex);
-      final end = math.max(provider.selectionBase!, provider.cursorIndex);
-      Clipboard.setData(
-        ClipboardData(text: provider.engine.getText().substring(start, end)),
-      );
-      provider.deleteSelection();
-    } else if (value == 'paste') {
-      _pasteFromClipboard(provider);
-    } else if (value == 'select_all') {
-      provider.updateSelection(provider.engine.getText().length, 0);
-    } else if (value == 'bold') {
-      provider.toggleBold();
-    } else if (value == 'italic') {
-      provider.toggleItalic();
-    }
-  }
-
-  Future<void> _pasteFromClipboard(EditorProvider provider) async {
-    final data = await Clipboard.getData(Clipboard.kTextPlain);
-    if (data != null && data.text != null && data.text!.isNotEmpty) {
-      provider.insertText(data.text!);
-    }
-  }
-
-  bool _handleKeyEvent(KeyEvent event, EditorProvider provider) {
-    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
-      return false;
-    }
-
-    final logicalKey = event.logicalKey;
-    final character = event.character;
-    final isCtrl =
-        HardwareKeyboard.instance.isControlPressed ||
-        HardwareKeyboard.instance.isMetaPressed;
-    final isShift = HardwareKeyboard.instance.isShiftPressed;
-
-    _startBlinking();
-
-    if (isCtrl) {
-      if (logicalKey == LogicalKeyboardKey.keyS) {
-        widget.onSave?.call();
-        return true;
-      } else if (logicalKey == LogicalKeyboardKey.keyZ) {
-        if (isShift) {
-          provider.executeRedo();
-        } else {
-          provider.executeUndo();
-        }
-        return true;
-      } else if (logicalKey == LogicalKeyboardKey.keyY) {
-        provider.executeRedo();
-        return true;
-      } else if (logicalKey == LogicalKeyboardKey.keyA) {
-        provider.updateSelection(provider.engine.getText().length, 0);
-        return true;
-      } else if (logicalKey == LogicalKeyboardKey.keyC) {
-        if (provider.hasSelection) {
-          final start = math.min(provider.selectionBase!, provider.cursorIndex);
-          final end = math.max(provider.selectionBase!, provider.cursorIndex);
-          Clipboard.setData(
-            ClipboardData(
-              text: provider.engine.getText().substring(start, end),
-            ),
-          );
-        }
-        return true;
-      } else if (logicalKey == LogicalKeyboardKey.keyX) {
-        if (provider.hasSelection) {
-          final start = math.min(provider.selectionBase!, provider.cursorIndex);
-          final end = math.max(provider.selectionBase!, provider.cursorIndex);
-          Clipboard.setData(
-            ClipboardData(
-              text: provider.engine.getText().substring(start, end),
-            ),
-          );
-          provider.deleteSelection();
-        }
-        return true;
-      } else if (logicalKey == LogicalKeyboardKey.keyV) {
-        _pasteFromClipboard(provider);
-        return true;
-      }
-    }
-
-    if (logicalKey == LogicalKeyboardKey.arrowLeft ||
-        logicalKey == LogicalKeyboardKey.arrowRight ||
-        logicalKey == LogicalKeyboardKey.arrowUp ||
-        logicalKey == LogicalKeyboardKey.arrowDown) {
-      int? newBase = isShift
-          ? (provider.selectionBase ?? provider.cursorIndex)
-          : null;
-      int newCursor = provider.cursorIndex;
-
-      if (logicalKey == LogicalKeyboardKey.arrowLeft) {
-        if (newCursor > 0) {
-          newCursor--;
-        }
-        _intendedCursorX = null;
-      } else if (logicalKey == LogicalKeyboardKey.arrowRight) {
-        if (newCursor < provider.engine.getText().length) {
-          newCursor++;
-        }
-        _intendedCursorX = null;
-      } else {
-        newCursor = _calculateVerticalMove(
-          provider,
-          logicalKey == LogicalKeyboardKey.arrowUp,
-        );
-      }
-      provider.updateSelection(newCursor, newBase);
-      _resetIme();
-      return true;
-    }
-
-    _intendedCursorX = null;
-
-    if (logicalKey == LogicalKeyboardKey.tab) {
-      provider.insertText('    ');
-      return true;
-    }
-
-    final bool isMobile = !kIsWeb && (Platform.isAndroid || Platform.isIOS);
-
-    if (!isMobile) {
-      if (logicalKey == LogicalKeyboardKey.backspace) {
-        provider.deleteCharacter();
-        return true;
-      }
-      if (logicalKey == LogicalKeyboardKey.enter) {
-        provider.insertText('\n');
-        return true;
-      }
-      if (character != null && character.isNotEmpty && !isCtrl) {
-        provider.insertText(character);
-        return true;
-      }
-    }
-    return false;
-  }
-
   TextPainter _buildPainter(
     EditorProvider provider,
     double maxWidth,
@@ -398,10 +180,7 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
     double printableWidth = provider.isPageMode
         ? maxWidth - mLeft - mRight
         : maxWidth - 64;
-
-    if (printableWidth < 100) {
-      printableWidth = 100;
-    }
+    if (printableWidth < 100) printableWidth = 100;
 
     return TextPainter(text: textSpan, textDirection: TextDirection.ltr)
       ..layout(minWidth: 0, maxWidth: printableWidth);
@@ -435,9 +214,7 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
     }
 
     double printableHeight = a4Height - mTop - mBottom;
-    if (printableHeight < 100) {
-      printableHeight = 100;
-    }
+    if (printableHeight < 100) printableHeight = 100;
 
     List<double> breaks = [0.0];
     double currentSubHeight = 0.0;
@@ -469,9 +246,7 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
   }
 
   int _calculateVerticalMove(EditorProvider provider, bool isUp) {
-    if (_cachedTextPainter == null) {
-      return provider.cursorIndex;
-    }
+    if (_cachedTextPainter == null) return provider.cursorIndex;
 
     int len = provider.engine.getText().length;
     final textPainter = _cachedTextPainter!;
@@ -487,9 +262,7 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
     _intendedCursorX ??= currentOffset.dx;
     final metrics = textPainter.computeLineMetrics();
 
-    if (metrics.isEmpty) {
-      return isUp ? 0 : len;
-    }
+    if (metrics.isEmpty) return isUp ? 0 : len;
 
     double accumulatedY = 0;
     int currentLineIdx = metrics.length - 1;
@@ -506,13 +279,8 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
     }
 
     int targetLine = isUp ? currentLineIdx - 1 : currentLineIdx + 1;
-
-    if (targetLine < 0) {
-      return provider.cursorIndex;
-    }
-    if (targetLine >= metrics.length) {
-      return provider.cursorIndex;
-    }
+    if (targetLine < 0) return provider.cursorIndex;
+    if (targetLine >= metrics.length) return provider.cursorIndex;
 
     double targetY = lineCenters[targetLine];
     final newPosition = textPainter.getPositionForOffset(
@@ -560,7 +328,6 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
         _currentMaxWidth = provider.isPageMode
             ? (isMobile ? constraints.maxWidth : 800.0)
             : constraints.maxWidth;
-
         _cachedTextPainter = _buildPainter(
           provider,
           _currentMaxWidth,
@@ -593,188 +360,270 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
               crossAxisMargin: 2,
             ),
           ),
-          child: SingleChildScrollView(
-            physics: _isDraggingHandle
-                ? const NeverScrollableScrollPhysics()
-                : null,
-            child: Container(
-              width: constraints.maxWidth,
-              constraints: BoxConstraints(minHeight: constraints.maxHeight),
-              alignment: Alignment.topCenter,
-              color: provider.isPageMode
-                  ? const Color(0xFF050505)
-                  : Colors.transparent,
-              padding: provider.isPageMode
-                  ? const EdgeInsets.symmetric(vertical: 32)
-                  : EdgeInsets.zero,
-              child: MouseRegion(
-                cursor: SystemMouseCursors.text,
-                child: GestureDetector(
-                  onPanDown: (details) {
-                    _focusNode.requestFocus();
-                    _intendedCursorX = null;
-                    _currentDragHandle = DragHandle.none;
-
-                    if (isMobile &&
-                        provider.hasSelection &&
-                        _cachedTextPainter != null &&
-                        _cachedLayout != null) {
-                      int startIdx = math.min(
-                        provider.selectionBase!,
-                        provider.cursorIndex,
-                      );
-                      int endIdx = math.max(
-                        provider.selectionBase!,
-                        provider.cursorIndex,
-                      );
-
-                      double logicalY = _cachedLayout!.physicalToLogicalY(
-                        details.localPosition.dy,
-                      );
-                      double logicalX =
-                          details.localPosition.dx -
-                          (provider.isPageMode
-                              ? _cachedLayout!.marginLeft
-                              : 32.0);
-                      Offset logicalTouch = Offset(logicalX, logicalY);
-
-                      final boxes = _cachedTextPainter!.getBoxesForSelection(
-                        TextSelection(
-                          baseOffset: startIdx,
-                          extentOffset: endIdx,
-                        ),
-                      );
-
-                      if (boxes.isNotEmpty) {
-                        Offset leftHandlePos = Offset(
-                          boxes.first.left,
-                          boxes.first.bottom + 6,
-                        );
-                        Offset rightHandlePos = Offset(
-                          boxes.last.right,
-                          boxes.last.bottom + 6,
-                        );
-
-                        if ((logicalTouch - leftHandlePos).distance < 70) {
-                          _currentDragHandle = DragHandle.left;
-                          _dragAnchorIndex = endIdx;
-                          setState(() => _isDraggingHandle = true);
-                          return;
-                        } else if ((logicalTouch - rightHandlePos).distance <
-                            70) {
-                          _currentDragHandle = DragHandle.right;
-                          _dragAnchorIndex = startIdx;
-                          setState(() => _isDraggingHandle = true);
-                          return;
-                        }
-                      }
-                    }
-                  },
-                  onTapUp: (details) {
-                    if (_currentDragHandle != DragHandle.none) {
-                      return;
-                    }
-
-                    int idx = _getOffsetIndex(details.localPosition, provider);
-
-                    if (provider.hasSelection) {
-                      int min = math.min(
-                        provider.selectionBase!,
-                        provider.cursorIndex,
-                      );
-                      int max = math.max(
-                        provider.selectionBase!,
-                        provider.cursorIndex,
-                      );
-                      if (idx >= min && idx <= max) {
-                        _showContextMenu(
-                          context,
-                          details.globalPosition,
-                          provider,
-                        );
-                        return;
-                      }
-                    }
-
-                    context.read<EditorProvider>().updateSelection(idx, null);
-                    _resetIme();
-                    _startBlinking();
-                  },
-                  onDoubleTapDown: (details) {
-                    _focusNode.requestFocus();
-                    _intendedCursorX = null;
-                    int idx = _getOffsetIndex(details.localPosition, provider);
-                    context.read<EditorProvider>().selectWordAt(idx);
-                    _resetIme();
-                    _startBlinking();
-                  },
-                  onLongPressStart: (details) {
-                    _focusNode.requestFocus();
-                    int idx = _getOffsetIndex(details.localPosition, provider);
-
-                    if (!provider.hasSelection) {
-                      context.read<EditorProvider>().selectWordAt(idx);
-                    } else {
-                      int minSel = math.min(
-                        provider.selectionBase!,
-                        provider.cursorIndex,
-                      );
-                      int maxSel = math.max(
-                        provider.selectionBase!,
-                        provider.cursorIndex,
-                      );
-                      if (idx < minSel || idx > maxSel) {
-                        context.read<EditorProvider>().selectWordAt(idx);
-                      }
-                    }
-                    _resetIme();
-                    _showContextMenu(context, details.globalPosition, provider);
-                  },
-                  onPanStart: (details) {
-                    if (_currentDragHandle == DragHandle.none) {
+          child: NotificationListener<ScrollNotification>(
+            onNotification: (scrollInfo) {
+              _hideMiniToolbar();
+              return false;
+            },
+            child: SingleChildScrollView(
+              physics: _isDraggingHandle
+                  ? const NeverScrollableScrollPhysics()
+                  : null,
+              child: Container(
+                width: constraints.maxWidth,
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                alignment: Alignment.topCenter,
+                color: provider.isPageMode
+                    ? const Color(0xFF050505)
+                    : Colors.transparent,
+                padding: provider.isPageMode
+                    ? const EdgeInsets.symmetric(vertical: 32)
+                    : EdgeInsets.zero,
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.text,
+                  child: GestureDetector(
+                    onSecondaryTapDown: (details) {
+                      if (isMobile) return;
+                      _hideMiniToolbar();
+                      _focusNode.requestFocus();
                       int idx = _getOffsetIndex(
                         details.localPosition,
                         provider,
                       );
-                      context.read<EditorProvider>().updateSelection(idx, idx);
-                      _resetIme();
-                    }
-                  },
-                  onPanUpdate: (details) {
-                    int idx = _getOffsetIndex(details.localPosition, provider);
 
-                    if (_currentDragHandle != DragHandle.none) {
-                      context.read<EditorProvider>().updateSelection(
-                        idx,
-                        _dragAnchorIndex,
+                      if (!provider.hasSelection) {
+                        provider.updateSelection(idx, null);
+                      } else {
+                        int min = math.min(
+                          provider.selectionBase!,
+                          provider.cursorIndex,
+                        );
+                        int max = math.max(
+                          provider.selectionBase!,
+                          provider.cursorIndex,
+                        );
+                        if (idx < min || idx > max) {
+                          provider.updateSelection(idx, null);
+                        }
+                      }
+                      EditorMenus.showDesktopContextMenu(
+                        context,
+                        details.globalPosition,
+                        provider,
+                        _hideMiniToolbar,
                       );
-                    } else {
-                      context.read<EditorProvider>().updateSelection(
-                        idx,
-                        provider.selectionBase,
+                    },
+
+                    onTapDown: (details) {
+                      _hideMiniToolbar();
+                      _focusNode.requestFocus();
+                      _intendedCursorX = null;
+
+                      if (!isMobile) {
+                        int idx = _getOffsetIndex(
+                          details.localPosition,
+                          provider,
+                        );
+                        provider.updateSelection(idx, null);
+                      }
+                    },
+
+                    onPanDown: (details) {
+                      if (!isMobile) return;
+                      _currentDragHandle = DragHandle.none;
+
+                      if (provider.hasSelection &&
+                          _cachedTextPainter != null &&
+                          _cachedLayout != null) {
+                        int startIdx = math.min(
+                          provider.selectionBase!,
+                          provider.cursorIndex,
+                        );
+                        int endIdx = math.max(
+                          provider.selectionBase!,
+                          provider.cursorIndex,
+                        );
+
+                        double logicalY = _cachedLayout!.physicalToLogicalY(
+                          details.localPosition.dy,
+                        );
+                        double logicalX =
+                            details.localPosition.dx -
+                            (provider.isPageMode
+                                ? _cachedLayout!.marginLeft
+                                : 32.0);
+                        Offset logicalTouch = Offset(logicalX, logicalY);
+
+                        final boxes = _cachedTextPainter!.getBoxesForSelection(
+                          TextSelection(
+                            baseOffset: startIdx,
+                            extentOffset: endIdx,
+                          ),
+                        );
+
+                        if (boxes.isNotEmpty) {
+                          Offset leftHandlePos = Offset(
+                            boxes.first.left,
+                            boxes.first.bottom + 6,
+                          );
+                          Offset rightHandlePos = Offset(
+                            boxes.last.right,
+                            boxes.last.bottom + 6,
+                          );
+
+                          if ((logicalTouch - leftHandlePos).distance < 70) {
+                            _currentDragHandle = DragHandle.left;
+                            _dragAnchorIndex = endIdx;
+                            setState(() => _isDraggingHandle = true);
+                            return;
+                          } else if ((logicalTouch - rightHandlePos).distance <
+                              70) {
+                            _currentDragHandle = DragHandle.right;
+                            _dragAnchorIndex = startIdx;
+                            setState(() => _isDraggingHandle = true);
+                            return;
+                          }
+                        }
+                      }
+                    },
+
+                    onTapUp: (details) {
+                      if (_currentDragHandle != DragHandle.none) return;
+
+                      int idx = _getOffsetIndex(
+                        details.localPosition,
+                        provider,
                       );
-                    }
-                  },
-                  onPanEnd: (details) {
-                    _currentDragHandle = DragHandle.none;
-                    setState(() => _isDraggingHandle = false);
-                  },
-                  onPanCancel: () {
-                    _currentDragHandle = DragHandle.none;
-                    setState(() => _isDraggingHandle = false);
-                  },
-                  child: CustomPaint(
-                    size: Size(_currentMaxWidth, customPaintHeight),
-                    painter: EditorPainter(
-                      textPainter: _cachedTextPainter!,
-                      layout: _cachedLayout!,
-                      plainTextLength: provider.engine.getText().length,
-                      cursorIndex: provider.cursorIndex,
-                      selectionBase: provider.selectionBase,
-                      showCursor: _showCursor,
-                      currentFontSize: provider.currentFontSize ?? 16.0,
-                      imageCache: provider.imageCache,
-                      isMobile: isMobile,
+
+                      if (isMobile) {
+                        if (provider.hasSelection) {
+                          int min = math.min(
+                            provider.selectionBase!,
+                            provider.cursorIndex,
+                          );
+                          int max = math.max(
+                            provider.selectionBase!,
+                            provider.cursorIndex,
+                          );
+                          if (idx >= min && idx <= max) {
+                            EditorMenus.showMobileContextMenu(
+                              context,
+                              details.globalPosition,
+                              provider,
+                            );
+                            return;
+                          }
+                        }
+                        provider.updateSelection(idx, null);
+                      }
+
+                      _resetIme();
+                      _startBlinking();
+                    },
+
+                    onDoubleTapDown: (details) {
+                      _hideMiniToolbar();
+                      _focusNode.requestFocus();
+                      _intendedCursorX = null;
+                      int idx = _getOffsetIndex(
+                        details.localPosition,
+                        provider,
+                      );
+                      provider.selectWordAt(idx);
+
+                      if (!isMobile) {
+                        _showMiniToolbarWrapper(
+                          details.globalPosition,
+                          provider,
+                        );
+                      }
+
+                      _resetIme();
+                      _startBlinking();
+                    },
+
+                    onLongPressStart: (details) {
+                      if (!isMobile) return;
+                      _focusNode.requestFocus();
+                      int idx = _getOffsetIndex(
+                        details.localPosition,
+                        provider,
+                      );
+
+                      if (!provider.hasSelection) {
+                        provider.selectWordAt(idx);
+                      } else {
+                        int minSel = math.min(
+                          provider.selectionBase!,
+                          provider.cursorIndex,
+                        );
+                        int maxSel = math.max(
+                          provider.selectionBase!,
+                          provider.cursorIndex,
+                        );
+                        if (idx < minSel || idx > maxSel) {
+                          provider.selectWordAt(idx);
+                        }
+                      }
+                      _resetIme();
+                      EditorMenus.showMobileContextMenu(
+                        context,
+                        details.globalPosition,
+                        provider,
+                      );
+                    },
+
+                    onPanStart: (details) {
+                      _hideMiniToolbar();
+                      if (_currentDragHandle == DragHandle.none) {
+                        int idx = _getOffsetIndex(
+                          details.localPosition,
+                          provider,
+                        );
+                        provider.updateSelection(idx, idx);
+                        _resetIme();
+                      }
+                    },
+                    onPanUpdate: (details) {
+                      _lastPanGlobalPos = details.globalPosition;
+                      int idx = _getOffsetIndex(
+                        details.localPosition,
+                        provider,
+                      );
+
+                      if (_currentDragHandle != DragHandle.none) {
+                        provider.updateSelection(idx, _dragAnchorIndex);
+                      } else {
+                        provider.updateSelection(idx, provider.selectionBase);
+                      }
+                    },
+                    onPanEnd: (details) {
+                      _currentDragHandle = DragHandle.none;
+                      setState(() => _isDraggingHandle = false);
+
+                      if (!isMobile &&
+                          provider.hasSelection &&
+                          _lastPanGlobalPos != null) {
+                        _showMiniToolbarWrapper(_lastPanGlobalPos!, provider);
+                      }
+                    },
+                    onPanCancel: () {
+                      _currentDragHandle = DragHandle.none;
+                      setState(() => _isDraggingHandle = false);
+                    },
+                    child: CustomPaint(
+                      size: Size(_currentMaxWidth, customPaintHeight),
+                      painter: EditorPainter(
+                        textPainter: _cachedTextPainter!,
+                        layout: _cachedLayout!,
+                        plainTextLength: provider.engine.getText().length,
+                        cursorIndex: provider.cursorIndex,
+                        selectionBase: provider.selectionBase,
+                        showCursor: _showCursor,
+                        currentFontSize: provider.currentFontSize ?? 16.0,
+                        imageCache: provider.imageCache,
+                        isMobile: isMobile,
+                      ),
                     ),
                   ),
                 ),

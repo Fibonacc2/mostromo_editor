@@ -234,12 +234,17 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/note.dart';
 import 'local_storage_service.dart';
-import '../core/sync_utils.dart'; // 🌟 YENİ: Hash ve Zaman araçlarımız
+import '../core/sync_utils.dart';
 
 class CloudSyncService {
   static const String baseUrl =
       "https://mostromo.com/connect/android/notes_api.php";
   static int currentUserId = 0;
+
+  // 🌟 YENİ 1: ÇAKIŞMA KİLİDİ (Aynı anda 2 postacının yola çıkmasını engeller)
+  static bool _isSyncing = false;
+  // 🌟 YENİ 2: BİTİŞ SİNYALİ (Dashboard'a "sayfayı yenile" demek için)
+  static final ValueNotifier<int> onSyncCompleted = ValueNotifier<int>(0);
 
   static Future<bool> checkLoginStatus() async {
     final prefs = await SharedPreferences.getInstance();
@@ -252,17 +257,18 @@ class CloudSyncService {
     return false;
   }
 
-  /// 🌟 POSTACI: Akıllı Senkronizasyon (Toplu İşlem)
   static Future<void> syncAllNotes() async {
+    // Eğer postacı zaten yoldaysa yeni emri iptal et! (Spam engellendi)
+    if (_isSyncing) return;
     if (!await checkLoginStatus()) return;
 
+    _isSyncing = true; // Kapıyı kilitle
     try {
       debugPrint("🔄 [POSTACI] Mesaiye Başladı (UserID: $currentUserId)...");
 
       final List<MostromoNote> localNotes =
           await LocalStorageService.loadAllNotes();
 
-      // 1. Sunucudan sadece METADATA (Liste) çekiyoruz
       final response = await http.get(
         Uri.parse('$baseUrl?action=list&user_id=$currentUserId'),
       );
@@ -274,23 +280,18 @@ class CloudSyncService {
 
       final List<dynamic> cloudData = jsonDecode(response.body)['notes'] ?? [];
 
-      // Buluttaki verileri UTC tarihlere çevirerek haritaya koy
       Map<String, Map<String, dynamic>> cloudNotesMap = {};
       for (var item in cloudData) {
         cloudNotesMap[item['id'].toString()] = {
-          'date': DateTime.parse(
-            item['lastUpdated'],
-          ).toUtc(), // Sunucu tarihini UTC yap
+          'date': DateTime.parse(item['lastUpdated']).toUtc(),
           'hash': item['hash'] ?? '',
         };
       }
 
-      // 2. Yerel Dosyaları Tarama
       for (var localNote in localNotes) {
         final cloudInfo = cloudNotesMap[localNote.id];
 
         if (cloudInfo == null) {
-          // Sunucuda yok ama yerelde var. (Kullanıcı offline iken yeni not açmış)
           if (!localNote.isSynced) {
             debugPrint(
               "⬆️ [POSTACI] '${localNote.title}' yeni dosya, buluta fırlatılıyor...",
@@ -299,13 +300,10 @@ class CloudSyncService {
           }
         } else {
           final DateTime cloudDate = cloudInfo['date'];
-
-          // Milisaniye bazında kesin kıyaslama
           final int localTimeMs = localNote.lastUpdated.millisecondsSinceEpoch;
           final int cloudTimeMs = cloudDate.millisecondsSinceEpoch;
 
           if (!localNote.isSynced) {
-            // YERELDE DEĞİŞİKLİK YAPILMIŞ: Hangi dosya daha güncel? (Son Yazan Kazanır)
             if (localTimeMs >= cloudTimeMs) {
               debugPrint(
                 "⬆️ [POSTACI] '${localNote.title}' yerelde güncellenmiş. Buluta fırlatılıyor...",
@@ -318,7 +316,6 @@ class CloudSyncService {
               await downloadAndSaveNoteLocally(localNote.id);
             }
           } else {
-            // YERELDE DEĞİŞİKLİK YOK (isSynced = true). Sadece bulutta yeni bir şey var mı diye bak.
             if (cloudTimeMs > localTimeMs) {
               debugPrint(
                 "⬇️ [POSTACI] '${localNote.title}' bulutta güncellenmiş. İndiriliyor...",
@@ -327,11 +324,9 @@ class CloudSyncService {
             }
           }
         }
-        // İncelenen dosyayı haritadan sil ki geriye sadece yerelde olmayanlar kalsın
         cloudNotesMap.remove(localNote.id);
       }
 
-      // 3. Yerelde olmayan (başka cihazdan açılmış) dosyaları indir
       for (String missingLocalId in cloudNotesMap.keys) {
         debugPrint(
           "⬇️ [POSTACI] Eksik dosya bulundu ($missingLocalId), indiriliyor...",
@@ -342,10 +337,13 @@ class CloudSyncService {
       debugPrint("✅ [POSTACI] Mesaisi Bitti. Tüm dosyalar güncel!");
     } catch (e) {
       debugPrint("❌ [POSTACI] Kaza Yaptı: $e");
+    } finally {
+      // 🌟 KİLİT AÇILDI VE SİNYAL GÖNDERİLDİ!
+      _isSyncing = false;
+      onSyncCompleted.value++; // Değerin artması Dashboard'u tetikleyecek
     }
   }
 
-  /// 🌟 YÜKLEME MOTORU (Sadece güncellenmişleri gönderir)
   static Future<void> uploadNote(MostromoNote note) async {
     if (currentUserId == 0) return;
 
@@ -354,8 +352,6 @@ class CloudSyncService {
         note.id,
         note.extension,
       );
-
-      // Merkezi alet çantasından Hash üretiyoruz
       final hashToSave = SyncUtils.generateHash(note.title, fileContent);
 
       final requestUrl = '$baseUrl?action=sync&user_id=$currentUserId';
@@ -367,7 +363,6 @@ class CloudSyncService {
           'id': note.id,
           'title': note.title,
           'previewText': note.previewText,
-          // Sunucuya HER ZAMAN UTC formatında gönder
           'lastUpdated': note.lastUpdated.toUtc().toIso8601String(),
           'extension': note.extension,
           'hash': hashToSave,
@@ -380,7 +375,6 @@ class CloudSyncService {
         if (responseData['success'] == true) {
           debugPrint("✅ [UPLOAD] '${note.title}' başarıyla yüklendi.");
 
-          // Yükleme başarılı olduğu için bayrağı tekrar kilitliyoruz
           note.isSynced = true;
           await LocalStorageService.saveNote(note);
         }
@@ -390,7 +384,6 @@ class CloudSyncService {
     }
   }
 
-  /// 🌟 İNDİRME MOTORU
   static Future<void> downloadAndSaveNoteLocally(String noteId) async {
     try {
       final requestUrl =
@@ -404,15 +397,13 @@ class CloudSyncService {
             id: data['id'].toString(),
             title: data['title'] ?? 'İsimsiz Defter',
             previewText: data['previewText'] ?? '',
-            // Buluttan geleni her zaman UTC olarak kabul edip diske bas
             lastUpdated: DateTime.parse(
               data['lastUpdated'] ?? DateTime.now().toUtc().toIso8601String(),
             ).toUtc(),
-            isSynced: true, // Buluttan geldiği için taze ve güncel
+            isSynced: true,
             extension: data['extension'] ?? '.mro',
           );
 
-          // Önce ham JSON'ı, sonra Note modelini fiziksel diske yazıyoruz
           await LocalStorageService.saveRawCloudData(
             downloadedNote.id,
             downloadedNote.extension,
