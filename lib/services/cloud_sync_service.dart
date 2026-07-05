@@ -228,6 +228,7 @@ class CloudSyncService {
 */
 
 import 'dart:convert';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -391,8 +392,30 @@ class CloudSyncService {
       final response = await http.get(Uri.parse(requestUrl));
 
       if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
+        // 🌟 GÖZLEM: API'den gelen ham cevabı konsola döküyoruz
+        debugPrint(
+          "🔍 [API DÖNÜŞÜ] Cevap: ${response.body.substring(0, math.min(response.body.length, 500))}",
+        );
+
+        final Map<String, dynamic> data = jsonDecode(response.body);
+
         if (data['success'] == true) {
+          // 🌟 KONTROL: fileData'nın içini görüyor muyuz?
+          final rawFileData = data['fileData'];
+          debugPrint(
+            "🔍 [API DÖNÜŞÜ] fileData türü: ${rawFileData.runtimeType}",
+          );
+
+          if (rawFileData == null) {
+            debugPrint("❌ HATA: API 'fileData' anahtarını null gönderdi!");
+            return;
+          }
+
+          // Eğer veri bir Object ise String'e çevir, String ise olduğu gibi bırak
+          final String finalFileData = (rawFileData is String)
+              ? rawFileData
+              : jsonEncode(rawFileData);
+
           final downloadedNote = MostromoNote(
             id: data['id'].toString(),
             title: data['title'] ?? 'İsimsiz Defter',
@@ -402,16 +425,19 @@ class CloudSyncService {
             ).toUtc(),
             isSynced: true,
             extension: data['extension'] ?? '.mro',
+            mroData: finalFileData, // 🌟 İşlenmiş veriyi buraya atıyoruz
           );
 
           await LocalStorageService.saveRawCloudData(
             downloadedNote.id,
             downloadedNote.extension,
-            data['fileData'] ?? '{}',
+            finalFileData,
           );
           await LocalStorageService.saveNote(downloadedNote);
 
-          debugPrint("✅ [DOWNLOAD] '$noteId' başarıyla indirildi.");
+          debugPrint(
+            "✅ [DOWNLOAD] '$noteId' diske yazıldı. Veri: ${finalFileData.length} karakter.",
+          );
         }
       }
     } catch (e) {

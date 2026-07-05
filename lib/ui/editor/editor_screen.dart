@@ -39,7 +39,23 @@ class _EditorScreenState extends State<EditorScreen> {
     _titleController = TextEditingController(text: _lastSavedTitle);
 
     final provider = context.read<EditorProvider>();
+    // 🌟 GÜVENLİK: Eğer widget.note ile geliyorsa, MRO verisini KESİNLİKLE kullan.
+    // Boş bir string gelmiş olsa bile initialize fonksiyonuna bunu gönderiyoruz.
+    String initialData = widget.note?.mroData ?? '';
 
+    // Eğer MRO verisi boşsa ama dosya sistemde varsa, diski son bir kez daha kontrol et
+    if (initialData.isEmpty && widget.note != null) {
+      LocalStorageService.readNoteContentForCloud(
+        widget.note!.id,
+        widget.note!.extension,
+      ).then((diskData) {
+        if (mounted) {
+          provider.initialize(diskData, title: _lastSavedTitle);
+        }
+      });
+    } else {
+      provider.initialize(initialData, title: _lastSavedTitle);
+    }
     _titleController.addListener(() {
       if (!_isReadOnly && _titleController.text != _lastSavedTitle) {
         provider.updateTitle(
@@ -150,14 +166,14 @@ class _EditorScreenState extends State<EditorScreen> {
       String preview = plainText
           .substring(0, math.min(100, plainText.length))
           .replaceAll('\n', ' ');
-
+      String serializedData = jsonEncode(provider.generateMroData());
       final updatedNote = MostromoNote(
         id: _noteId,
         title: _titleController.text.trim().isEmpty
             ? 'İsimsiz not'
             : _titleController.text,
         previewText: preview,
-        mroData: jsonEncode(provider.generateMroData()),
+        mroData: serializedData,
         lastUpdated: DateTime.now().toUtc(), // 🌟 UTC
         isSynced: false, // 🌟 POSTACI İÇİN
       );
