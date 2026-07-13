@@ -8,7 +8,6 @@ import '../../models/note.dart';
 import '../../providers/editor_provider.dart';
 import '../../engine/mostromo_editor.dart';
 import '../../services/local_storage_service.dart';
-
 import 'mostromo_status_bar.dart';
 import 'mostromo_title_bar.dart';
 import 'editor_toolbar.dart';
@@ -28,6 +27,7 @@ class _EditorScreenState extends State<EditorScreen> {
   late String _noteId;
   String _lastSavedTitle = '';
   late bool _isReadOnly;
+  bool _isReadingMode = false; // 🌟 YENİ: Okuma modu durumu
 
   @override
   void initState() {
@@ -39,11 +39,8 @@ class _EditorScreenState extends State<EditorScreen> {
     _titleController = TextEditingController(text: _lastSavedTitle);
 
     final provider = context.read<EditorProvider>();
-    // 🌟 GÜVENLİK: Eğer widget.note ile geliyorsa, MRO verisini KESİNLİKLE kullan.
-    // Boş bir string gelmiş olsa bile initialize fonksiyonuna bunu gönderiyoruz.
-    String initialData = widget.note?.mroData ?? '';
 
-    // Eğer MRO verisi boşsa ama dosya sistemde varsa, diski son bir kez daha kontrol et
+    String initialData = widget.note?.mroData ?? '';
     if (initialData.isEmpty && widget.note != null) {
       LocalStorageService.readNoteContentForCloud(
         widget.note!.id,
@@ -56,18 +53,15 @@ class _EditorScreenState extends State<EditorScreen> {
     } else {
       provider.initialize(initialData, title: _lastSavedTitle);
     }
+
     _titleController.addListener(() {
       if (!_isReadOnly && _titleController.text != _lastSavedTitle) {
-        provider.updateTitle(
-          _titleController.text,
-        ); // 🌟 DÜZELTME: Provider'a başlığı bildiriyoruz
+        provider.updateTitle(_titleController.text);
       }
     });
 
-    // 🌟 DÜZELTME 1: Başlığı da gönderiyoruz ki Hash Kalkanı doğru çalışsın
     provider.initialize(widget.note?.mroData ?? '', title: _lastSavedTitle);
 
-    // 🌟 DÜZELTME 2: 2 Saniyelik Sessiz Kayıt (Debounce) Dinleyicisi
     provider.onLocalSaveTriggered = (title, mroData) async {
       if (_isReadOnly) return;
 
@@ -79,16 +73,15 @@ class _EditorScreenState extends State<EditorScreen> {
       final updatedNote = MostromoNote(
         id: _noteId,
         title: title.trim().isEmpty ? 'İsimsiz not' : title,
-        previewText: preview, // Otomatik özet metni
+        previewText: preview,
         mroData: mroData,
-        lastUpdated: DateTime.now().toUtc(), // 🌟 UTC STANDARDINA UYULDU
-        isSynced: false, // 🌟 POSTACI İÇİN İŞARETLENDİ
+        lastUpdated: DateTime.now().toUtc(),
+        isSynced: false,
       );
 
       await LocalStorageService.saveNote(updatedNote);
       _lastSavedTitle = updatedNote.title;
       provider.markAsSaved();
-      // Not: Bu arka plan (sessiz) kaydı olduğu için bilerek SnackBar göstermiyoruz, kullanıcıyı darlamasın.
     };
   }
 
@@ -98,12 +91,9 @@ class _EditorScreenState extends State<EditorScreen> {
     super.dispose();
   }
 
-  // Manuel "Kaydet" butonuna basıldığında (SnackBar gösterir)
   Future<void> _saveNoteOnly() async {
     if (_isReadOnly) return;
     final provider = context.read<EditorProvider>();
-
-    // Hash Kalkanı üzerinden manuel kaydetmeyi zorla (Bu işlem onLocalSaveTriggered'ı tetikler)
     provider.forceSave();
 
     if (mounted) {
@@ -160,13 +150,14 @@ class _EditorScreenState extends State<EditorScreen> {
 
     final provider = context.read<EditorProvider>();
 
-    // Değişiklik varsa son bir kez kaydet
     if (provider.isDirty || _titleController.text != _lastSavedTitle) {
       String plainText = provider.engine.getText();
       String preview = plainText
           .substring(0, math.min(100, plainText.length))
           .replaceAll('\n', ' ');
+
       String serializedData = jsonEncode(provider.generateMroData());
+
       final updatedNote = MostromoNote(
         id: _noteId,
         title: _titleController.text.trim().isEmpty
@@ -174,12 +165,11 @@ class _EditorScreenState extends State<EditorScreen> {
             : _titleController.text,
         previewText: preview,
         mroData: serializedData,
-        lastUpdated: DateTime.now().toUtc(), // 🌟 UTC
-        isSynced: false, // 🌟 POSTACI İÇİN
+        lastUpdated: DateTime.now().toUtc(),
+        isSynced: false,
       );
-      // 🌟 KOPUK KABLO BURASIYDI: Panele dönmeden hemen önce DİSKE YAZIYORUZ!
-      await LocalStorageService.saveNote(updatedNote);
 
+      await LocalStorageService.saveNote(updatedNote);
       if (mounted) Navigator.pop(context, updatedNote);
     } else {
       if (mounted) Navigator.pop(context, null);
@@ -196,7 +186,6 @@ class _EditorScreenState extends State<EditorScreen> {
     final bool isMobile = MediaQuery.of(context).size.width < 600;
 
     return PopScope(
-      // 🌟 DÜZELTME 3: Kullanıcı Android'in "Geri" tuşuna veya ekran kaydırmasına basarsa veri kaybolmasın diye araya giriyoruz.
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
         if (didPop) return;
@@ -217,20 +206,31 @@ class _EditorScreenState extends State<EditorScreen> {
                 onClose: _saveAndClose,
                 isExternal: _isReadOnly,
                 onImport: _importAndUnlock,
+                isReadingMode: _isReadingMode, // 🌟 YENİ
+                onToggleReadingMode: () {
+                  setState(() {
+                    _isReadingMode =
+                        !_isReadingMode; // 🌟 YENİ: Okuma modunu tetikle
+                  });
+                },
               ),
-
-              if (!_isReadOnly) const EditorToolbar(),
-
+              if (!_isReadOnly && !_isReadingMode)
+                const EditorToolbar(), // 🌟 YENİ: Okuma modunda araç çubuğunu gizle
               Expanded(
                 child: FocusScope(
-                  canRequestFocus: !_isReadOnly,
+                  canRequestFocus:
+                      !_isReadOnly &&
+                      !_isReadingMode, // 🌟 YENİ: Okuma modunda odaklanmayı engelle
                   child: AbsorbPointer(
                     absorbing: _isReadOnly,
-                    child: MostromoEditorWidget(onSave: _saveNoteOnly),
+                    child: MostromoEditorWidget(
+                      onSave: _saveNoteOnly,
+                      isReadingMode:
+                          _isReadingMode, // 🌟 YENİ: Editor motoruna durumu bildir
+                    ),
                   ),
                 ),
               ),
-
               if (!isMobile) const MostromoStatusBar(),
             ],
           ),

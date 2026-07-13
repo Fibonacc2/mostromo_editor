@@ -9,15 +9,21 @@ import '../providers/editor_provider.dart';
 import 'page_layout.dart';
 import 'editor_painter.dart';
 import 'editor_keyboard_handler.dart';
-import '../ui/editor/editor_menus.dart'; // Yeni menü sistemimiz
+import '../ui/editor/editor_menus.dart';
 
 enum DragHandle { none, left, right }
 
 class MostromoEditorWidget extends StatefulWidget {
   final VoidCallback? onSave;
   final bool isActive;
+  final bool isReadingMode; // 🌟 YENİ
 
-  const MostromoEditorWidget({super.key, this.onSave, this.isActive = true});
+  const MostromoEditorWidget({
+    super.key,
+    this.onSave,
+    this.isActive = true,
+    this.isReadingMode = false, // 🌟 YENİ
+  });
 
   @override
   State<MostromoEditorWidget> createState() => _MostromoEditorWidgetState();
@@ -51,8 +57,10 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
     super.initState();
     _focusNode = FocusNode(
       onKeyEvent: (node, event) {
-        if (!mounted) return KeyEventResult.ignored;
-        // 🌟 KISAYOLLAR ARTIK AYRI DOSYADAN ÇAĞRILIYOR
+        if (!mounted || widget.isReadingMode)
+          return KeyEventResult
+              .ignored; // 🌟 YENİ: Okuma modunda tuşları yok say
+
         bool handled = EditorKeyboardHandler.handle(
           event,
           context.read<EditorProvider>(),
@@ -69,7 +77,7 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
     );
 
     _focusNode.addListener(() {
-      if (_focusNode.hasFocus) {
+      if (_focusNode.hasFocus && !widget.isReadingMode) {
         _startBlinking();
       } else {
         _cursorTimer?.cancel();
@@ -77,7 +85,25 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
       }
     });
 
-    if (widget.isActive) _startBlinking();
+    if (widget.isActive && !widget.isReadingMode) _startBlinking();
+  }
+
+  @override
+  void didUpdateWidget(covariant MostromoEditorWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 🌟 YENİ: Okuma moduna geçiş yapıldığında her şeyi temizle
+    if (widget.isReadingMode && !oldWidget.isReadingMode) {
+      _hideMiniToolbar();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+
+        _focusNode.unfocus(); // Klavyeyi güvenli bir şekilde kapat
+
+        // Seçimi iptal et ve Provider'a güvenli bir şekilde haber ver
+        final provider = context.read<EditorProvider>();
+        provider.updateSelection(provider.cursorIndex, null);
+      });
+    }
   }
 
   @override
@@ -98,7 +124,6 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
 
   void _showMiniToolbarWrapper(Offset globalPos, EditorProvider provider) {
     _hideMiniToolbar();
-    // 🌟 MENÜLER ARTIK AYRI DOSYADAN ÇAĞRILIYOR
     _miniToolbarEntry = EditorMenus.showMiniToolbar(
       context,
       globalPos,
@@ -128,7 +153,7 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
   }
 
   void _onImeChanged(String value, EditorProvider provider) {
-    if (_isImeUpdating) return;
+    if (_isImeUpdating || widget.isReadingMode) return;
     _hideMiniToolbar();
 
     if (value.startsWith(_previousImeText)) {
@@ -380,237 +405,262 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
                     ? const EdgeInsets.symmetric(vertical: 32)
                     : EdgeInsets.zero,
                 child: MouseRegion(
-                  cursor: SystemMouseCursors.text,
+                  cursor: widget.isReadingMode
+                      ? SystemMouseCursors.basic
+                      : SystemMouseCursors.text, // 🌟 Okuma Modunda Fare İmleci
                   child: GestureDetector(
-                    onSecondaryTapDown: (details) {
-                      if (isMobile) return;
-                      _hideMiniToolbar();
-                      _focusNode.requestFocus();
-                      int idx = _getOffsetIndex(
-                        details.localPosition,
-                        provider,
-                      );
+                    // 🌟 YENİ: Bütün dokunmatik olayları okuma modundayken NULL yaparak, kaydırma (scroll) işlevine devrettik
+                    onSecondaryTapDown: widget.isReadingMode
+                        ? null
+                        : (details) {
+                            if (isMobile) return;
+                            _hideMiniToolbar();
+                            _focusNode.requestFocus();
+                            int idx = _getOffsetIndex(
+                              details.localPosition,
+                              provider,
+                            );
 
-                      if (!provider.hasSelection) {
-                        provider.updateSelection(idx, null);
-                      } else {
-                        int min = math.min(
-                          provider.selectionBase!,
-                          provider.cursorIndex,
-                        );
-                        int max = math.max(
-                          provider.selectionBase!,
-                          provider.cursorIndex,
-                        );
-                        if (idx < min || idx > max) {
-                          provider.updateSelection(idx, null);
-                        }
-                      }
-                      EditorMenus.showDesktopContextMenu(
-                        context,
-                        details.globalPosition,
-                        provider,
-                        _hideMiniToolbar,
-                      );
-                    },
+                            if (!provider.hasSelection) {
+                              provider.updateSelection(idx, null);
+                            } else {
+                              int min = math.min(
+                                provider.selectionBase!,
+                                provider.cursorIndex,
+                              );
+                              int max = math.max(
+                                provider.selectionBase!,
+                                provider.cursorIndex,
+                              );
+                              if (idx < min || idx > max) {
+                                provider.updateSelection(idx, null);
+                              }
+                            }
+                            EditorMenus.showDesktopContextMenu(
+                              context,
+                              details.globalPosition,
+                              provider,
+                              _hideMiniToolbar,
+                            );
+                          },
+                    onTapDown: widget.isReadingMode
+                        ? null
+                        : (details) {
+                            _hideMiniToolbar();
+                            _focusNode.requestFocus();
+                            _intendedCursorX = null;
 
-                    onTapDown: (details) {
-                      _hideMiniToolbar();
-                      _focusNode.requestFocus();
-                      _intendedCursorX = null;
+                            if (!isMobile) {
+                              int idx = _getOffsetIndex(
+                                details.localPosition,
+                                provider,
+                              );
+                              provider.updateSelection(idx, null);
+                            }
+                          },
+                    onPanDown: widget.isReadingMode
+                        ? null
+                        : (details) {
+                            if (!isMobile) return;
+                            _currentDragHandle = DragHandle.none;
 
-                      if (!isMobile) {
-                        int idx = _getOffsetIndex(
-                          details.localPosition,
-                          provider,
-                        );
-                        provider.updateSelection(idx, null);
-                      }
-                    },
+                            if (provider.hasSelection &&
+                                _cachedTextPainter != null &&
+                                _cachedLayout != null) {
+                              int startIdx = math.min(
+                                provider.selectionBase!,
+                                provider.cursorIndex,
+                              );
+                              int endIdx = math.max(
+                                provider.selectionBase!,
+                                provider.cursorIndex,
+                              );
 
-                    onPanDown: (details) {
-                      if (!isMobile) return;
-                      _currentDragHandle = DragHandle.none;
+                              double logicalY = _cachedLayout!
+                                  .physicalToLogicalY(details.localPosition.dy);
+                              double logicalX =
+                                  details.localPosition.dx -
+                                  (provider.isPageMode
+                                      ? _cachedLayout!.marginLeft
+                                      : 32.0);
+                              Offset logicalTouch = Offset(logicalX, logicalY);
 
-                      if (provider.hasSelection &&
-                          _cachedTextPainter != null &&
-                          _cachedLayout != null) {
-                        int startIdx = math.min(
-                          provider.selectionBase!,
-                          provider.cursorIndex,
-                        );
-                        int endIdx = math.max(
-                          provider.selectionBase!,
-                          provider.cursorIndex,
-                        );
+                              final boxes = _cachedTextPainter!
+                                  .getBoxesForSelection(
+                                    TextSelection(
+                                      baseOffset: startIdx,
+                                      extentOffset: endIdx,
+                                    ),
+                                  );
 
-                        double logicalY = _cachedLayout!.physicalToLogicalY(
-                          details.localPosition.dy,
-                        );
-                        double logicalX =
-                            details.localPosition.dx -
-                            (provider.isPageMode
-                                ? _cachedLayout!.marginLeft
-                                : 32.0);
-                        Offset logicalTouch = Offset(logicalX, logicalY);
+                              if (boxes.isNotEmpty) {
+                                Offset leftHandlePos = Offset(
+                                  boxes.first.left,
+                                  boxes.first.bottom + 6,
+                                );
+                                Offset rightHandlePos = Offset(
+                                  boxes.last.right,
+                                  boxes.last.bottom + 6,
+                                );
 
-                        final boxes = _cachedTextPainter!.getBoxesForSelection(
-                          TextSelection(
-                            baseOffset: startIdx,
-                            extentOffset: endIdx,
-                          ),
-                        );
+                                if ((logicalTouch - leftHandlePos).distance <
+                                    70) {
+                                  _currentDragHandle = DragHandle.left;
+                                  _dragAnchorIndex = endIdx;
+                                  setState(() => _isDraggingHandle = true);
+                                  return;
+                                } else if ((logicalTouch - rightHandlePos)
+                                        .distance <
+                                    70) {
+                                  _currentDragHandle = DragHandle.right;
+                                  _dragAnchorIndex = startIdx;
+                                  setState(() => _isDraggingHandle = true);
+                                  return;
+                                }
+                              }
+                            }
+                          },
+                    onTapUp: widget.isReadingMode
+                        ? null
+                        : (details) {
+                            if (_currentDragHandle != DragHandle.none) return;
 
-                        if (boxes.isNotEmpty) {
-                          Offset leftHandlePos = Offset(
-                            boxes.first.left,
-                            boxes.first.bottom + 6,
-                          );
-                          Offset rightHandlePos = Offset(
-                            boxes.last.right,
-                            boxes.last.bottom + 6,
-                          );
+                            int idx = _getOffsetIndex(
+                              details.localPosition,
+                              provider,
+                            );
 
-                          if ((logicalTouch - leftHandlePos).distance < 70) {
-                            _currentDragHandle = DragHandle.left;
-                            _dragAnchorIndex = endIdx;
-                            setState(() => _isDraggingHandle = true);
-                            return;
-                          } else if ((logicalTouch - rightHandlePos).distance <
-                              70) {
-                            _currentDragHandle = DragHandle.right;
-                            _dragAnchorIndex = startIdx;
-                            setState(() => _isDraggingHandle = true);
-                            return;
-                          }
-                        }
-                      }
-                    },
+                            if (isMobile) {
+                              if (provider.hasSelection) {
+                                int min = math.min(
+                                  provider.selectionBase!,
+                                  provider.cursorIndex,
+                                );
+                                int max = math.max(
+                                  provider.selectionBase!,
+                                  provider.cursorIndex,
+                                );
+                                if (idx >= min && idx <= max) {
+                                  EditorMenus.showMobileContextMenu(
+                                    context,
+                                    details.globalPosition,
+                                    provider,
+                                  );
+                                  return;
+                                }
+                              }
+                              provider.updateSelection(idx, null);
+                            }
 
-                    onTapUp: (details) {
-                      if (_currentDragHandle != DragHandle.none) return;
+                            _resetIme();
+                            _startBlinking();
+                          },
+                    onDoubleTapDown: widget.isReadingMode
+                        ? null
+                        : (details) {
+                            _hideMiniToolbar();
+                            _focusNode.requestFocus();
+                            _intendedCursorX = null;
+                            int idx = _getOffsetIndex(
+                              details.localPosition,
+                              provider,
+                            );
+                            provider.selectWordAt(idx);
 
-                      int idx = _getOffsetIndex(
-                        details.localPosition,
-                        provider,
-                      );
+                            if (!isMobile) {
+                              _showMiniToolbarWrapper(
+                                details.globalPosition,
+                                provider,
+                              );
+                            }
 
-                      if (isMobile) {
-                        if (provider.hasSelection) {
-                          int min = math.min(
-                            provider.selectionBase!,
-                            provider.cursorIndex,
-                          );
-                          int max = math.max(
-                            provider.selectionBase!,
-                            provider.cursorIndex,
-                          );
-                          if (idx >= min && idx <= max) {
+                            _resetIme();
+                            _startBlinking();
+                          },
+                    onLongPressStart: widget.isReadingMode
+                        ? null
+                        : (details) {
+                            if (!isMobile) return;
+                            _focusNode.requestFocus();
+                            int idx = _getOffsetIndex(
+                              details.localPosition,
+                              provider,
+                            );
+
+                            if (!provider.hasSelection) {
+                              provider.selectWordAt(idx);
+                            } else {
+                              int minSel = math.min(
+                                provider.selectionBase!,
+                                provider.cursorIndex,
+                              );
+                              int maxSel = math.max(
+                                provider.selectionBase!,
+                                provider.cursorIndex,
+                              );
+                              if (idx < minSel || idx > maxSel) {
+                                provider.selectWordAt(idx);
+                              }
+                            }
+                            _resetIme();
                             EditorMenus.showMobileContextMenu(
                               context,
                               details.globalPosition,
                               provider,
                             );
-                            return;
-                          }
-                        }
-                        provider.updateSelection(idx, null);
-                      }
+                          },
+                    onPanStart: widget.isReadingMode
+                        ? null
+                        : (details) {
+                            _hideMiniToolbar();
+                            if (_currentDragHandle == DragHandle.none) {
+                              int idx = _getOffsetIndex(
+                                details.localPosition,
+                                provider,
+                              );
+                              provider.updateSelection(idx, idx);
+                              _resetIme();
+                            }
+                          },
+                    onPanUpdate: widget.isReadingMode
+                        ? null
+                        : (details) {
+                            _lastPanGlobalPos = details.globalPosition;
+                            int idx = _getOffsetIndex(
+                              details.localPosition,
+                              provider,
+                            );
 
-                      _resetIme();
-                      _startBlinking();
-                    },
+                            if (_currentDragHandle != DragHandle.none) {
+                              provider.updateSelection(idx, _dragAnchorIndex);
+                            } else {
+                              provider.updateSelection(
+                                idx,
+                                provider.selectionBase,
+                              );
+                            }
+                          },
+                    onPanEnd: widget.isReadingMode
+                        ? null
+                        : (details) {
+                            _currentDragHandle = DragHandle.none;
+                            setState(() => _isDraggingHandle = false);
 
-                    onDoubleTapDown: (details) {
-                      _hideMiniToolbar();
-                      _focusNode.requestFocus();
-                      _intendedCursorX = null;
-                      int idx = _getOffsetIndex(
-                        details.localPosition,
-                        provider,
-                      );
-                      provider.selectWordAt(idx);
-
-                      if (!isMobile) {
-                        _showMiniToolbarWrapper(
-                          details.globalPosition,
-                          provider,
-                        );
-                      }
-
-                      _resetIme();
-                      _startBlinking();
-                    },
-
-                    onLongPressStart: (details) {
-                      if (!isMobile) return;
-                      _focusNode.requestFocus();
-                      int idx = _getOffsetIndex(
-                        details.localPosition,
-                        provider,
-                      );
-
-                      if (!provider.hasSelection) {
-                        provider.selectWordAt(idx);
-                      } else {
-                        int minSel = math.min(
-                          provider.selectionBase!,
-                          provider.cursorIndex,
-                        );
-                        int maxSel = math.max(
-                          provider.selectionBase!,
-                          provider.cursorIndex,
-                        );
-                        if (idx < minSel || idx > maxSel) {
-                          provider.selectWordAt(idx);
-                        }
-                      }
-                      _resetIme();
-                      EditorMenus.showMobileContextMenu(
-                        context,
-                        details.globalPosition,
-                        provider,
-                      );
-                    },
-
-                    onPanStart: (details) {
-                      _hideMiniToolbar();
-                      if (_currentDragHandle == DragHandle.none) {
-                        int idx = _getOffsetIndex(
-                          details.localPosition,
-                          provider,
-                        );
-                        provider.updateSelection(idx, idx);
-                        _resetIme();
-                      }
-                    },
-                    onPanUpdate: (details) {
-                      _lastPanGlobalPos = details.globalPosition;
-                      int idx = _getOffsetIndex(
-                        details.localPosition,
-                        provider,
-                      );
-
-                      if (_currentDragHandle != DragHandle.none) {
-                        provider.updateSelection(idx, _dragAnchorIndex);
-                      } else {
-                        provider.updateSelection(idx, provider.selectionBase);
-                      }
-                    },
-                    onPanEnd: (details) {
-                      _currentDragHandle = DragHandle.none;
-                      setState(() => _isDraggingHandle = false);
-
-                      if (!isMobile &&
-                          provider.hasSelection &&
-                          _lastPanGlobalPos != null) {
-                        _showMiniToolbarWrapper(_lastPanGlobalPos!, provider);
-                      }
-                    },
-                    onPanCancel: () {
-                      _currentDragHandle = DragHandle.none;
-                      setState(() => _isDraggingHandle = false);
-                    },
+                            if (!isMobile &&
+                                provider.hasSelection &&
+                                _lastPanGlobalPos != null) {
+                              _showMiniToolbarWrapper(
+                                _lastPanGlobalPos!,
+                                provider,
+                              );
+                            }
+                          },
+                    onPanCancel: widget.isReadingMode
+                        ? null
+                        : () {
+                            _currentDragHandle = DragHandle.none;
+                            setState(() => _isDraggingHandle = false);
+                          },
                     child: CustomPaint(
                       size: Size(_currentMaxWidth, customPaintHeight),
                       painter: EditorPainter(
@@ -618,8 +668,13 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
                         layout: _cachedLayout!,
                         plainTextLength: provider.engine.getText().length,
                         cursorIndex: provider.cursorIndex,
-                        selectionBase: provider.selectionBase,
-                        showCursor: _showCursor,
+                        selectionBase: widget.isReadingMode
+                            ? null
+                            : provider
+                                  .selectionBase, // 🌟 Okuma Modunda Seçim Yok
+                        showCursor: widget.isReadingMode
+                            ? false
+                            : _showCursor, // 🌟 Okuma Modunda İmleç Yok
                         currentFontSize: provider.currentFontSize ?? 16.0,
                         imageCache: provider.imageCache,
                         isMobile: isMobile,
@@ -644,6 +699,8 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
               width: 10,
               height: 10,
               child: TextField(
+                readOnly: widget
+                    .isReadingMode, // 🌟 YENİ: Okuma modunda sanal klavyeyi zorla kapat
                 focusNode: _focusNode,
                 controller: _imeController,
                 autofocus: widget.isActive,
@@ -656,7 +713,6 @@ class _MostromoEditorWidgetState extends State<MostromoEditorWidget> {
               ),
             ),
           ),
-
         Positioned.fill(
           child: isMobile
               ? editorContent

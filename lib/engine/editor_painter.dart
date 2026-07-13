@@ -29,7 +29,9 @@ class EditorPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    void drawContent() {
+    // 🌟 YENİ: Çizim metodumuz artık "Bu sayfanın başlangıç ve bitiş sınırları ne?" diye soruyor.
+    void drawContent(double logicalStart, double logicalEnd) {
+      // 1. SEÇİM (SELECTION) ÇİZİMİ
       if (selectionBase != null && selectionBase != cursorIndex) {
         final start = math.min(selectionBase!, cursorIndex);
         final end = math.max(selectionBase!, cursorIndex);
@@ -39,14 +41,23 @@ class EditorPainter extends CustomPainter {
         final selectionPaint = Paint()
           ..color = MostromoTheme.accentColor.withValues(alpha: 0.3);
 
+        List<ui.TextBox> validBoxes = [];
         for (final box in boxes) {
-          canvas.drawRect(box.toRect(), selectionPaint);
+          // Kutunun merkez (orta) noktasını bul
+          double boxCenter = box.top + (box.bottom - box.top) / 2;
+
+          // Eğer kutunun merkezi bu sayfanın sınırları içindeyse çiz! (Hayalet kutuları engeller)
+          if (!layout.isPageMode ||
+              (boxCenter >= logicalStart && boxCenter <= logicalEnd)) {
+            canvas.drawRect(box.toRect(), selectionPaint);
+            validBoxes.add(box);
+          }
         }
 
-        if (isMobile && boxes.isNotEmpty) {
+        if (isMobile && validBoxes.isNotEmpty) {
           final handlePaint = Paint()..color = MostromoTheme.accentColor;
 
-          final firstBox = boxes.first;
+          final firstBox = validBoxes.first;
           final leftBottom = Offset(firstBox.left, firstBox.bottom);
           canvas.drawCircle(
             Offset(leftBottom.dx, leftBottom.dy + 6),
@@ -59,7 +70,7 @@ class EditorPainter extends CustomPainter {
             handlePaint..strokeWidth = 2,
           );
 
-          final lastBox = boxes.last;
+          final lastBox = validBoxes.last;
           final rightBottom = Offset(lastBox.right, lastBox.bottom);
           canvas.drawCircle(
             Offset(rightBottom.dx, rightBottom.dy + 6),
@@ -74,8 +85,10 @@ class EditorPainter extends CustomPainter {
         }
       }
 
+      // 2. METNİN KENDİSİNİ ÇİZ
       textPainter.paint(canvas, Offset.zero);
 
+      // 3. RESİMLERİ ÇİZ
       if (imageCache.isNotEmpty) {
         final paint = Paint()..filterQuality = FilterQuality.high;
         imageCache.forEach((offsetIndex, uiImage) {
@@ -87,21 +100,27 @@ class EditorPainter extends CustomPainter {
           );
           if (boxes.isNotEmpty) {
             final rect = boxes.first.toRect();
-            canvas.drawImageRect(
-              uiImage,
-              Rect.fromLTWH(
-                0,
-                0,
-                uiImage.width.toDouble(),
-                uiImage.height.toDouble(),
-              ),
-              rect,
-              paint,
-            );
+            double boxCenter = rect.top + (rect.height / 2);
+
+            if (!layout.isPageMode ||
+                (boxCenter >= logicalStart && boxCenter <= logicalEnd)) {
+              canvas.drawImageRect(
+                uiImage,
+                Rect.fromLTWH(
+                  0,
+                  0,
+                  uiImage.width.toDouble(),
+                  uiImage.height.toDouble(),
+                ),
+                rect,
+                paint,
+              );
+            }
           }
         });
       }
 
+      // 4. İMLECİ (CURSOR) ÇİZ
       if (showCursor &&
           (selectionBase == null || selectionBase == cursorIndex)) {
         final caretOffset = textPainter.getOffsetForCaret(
@@ -119,19 +138,21 @@ class EditorPainter extends CustomPainter {
         Rect? validBox;
 
         if (leftIndex >= 0 && leftIndex < plainTextLength) {
-          final boxes = textPainter.getBoxesForSelection(
+          final leftBoxes = textPainter.getBoxesForSelection(
             TextSelection(baseOffset: leftIndex, extentOffset: leftIndex + 1),
           );
-          if (boxes.isNotEmpty && (boxes.last.top - cursorTop).abs() < 5.0) {
-            validBox = boxes.last.toRect();
+          if (leftBoxes.isNotEmpty &&
+              (leftBoxes.last.top - cursorTop).abs() < 5.0) {
+            validBox = leftBoxes.last.toRect();
           }
         }
         if (validBox == null && rightIndex < plainTextLength) {
-          final boxes = textPainter.getBoxesForSelection(
+          final rightBoxes = textPainter.getBoxesForSelection(
             TextSelection(baseOffset: rightIndex, extentOffset: rightIndex + 1),
           );
-          if (boxes.isNotEmpty && (boxes.first.top - cursorTop).abs() < 5.0) {
-            validBox = boxes.first.toRect();
+          if (rightBoxes.isNotEmpty &&
+              (rightBoxes.first.top - cursorTop).abs() < 5.0) {
+            validBox = rightBoxes.first.toRect();
           }
         }
 
@@ -139,11 +160,17 @@ class EditorPainter extends CustomPainter {
           cursorTop = validBox.top;
           cursorHeight = validBox.height;
         }
-        canvas.drawLine(
-          Offset(caretOffset.dx, cursorTop),
-          Offset(caretOffset.dx, cursorTop + cursorHeight),
-          cursorPaint,
-        );
+
+        // 🌟 İMLEÇ KORUMASI: İmlecin merkezi bu sayfada mı?
+        double cursorCenter = cursorTop + (cursorHeight / 2);
+        if (!layout.isPageMode ||
+            (cursorCenter >= logicalStart && cursorCenter <= logicalEnd)) {
+          canvas.drawLine(
+            Offset(caretOffset.dx, cursorTop),
+            Offset(caretOffset.dx, cursorTop + cursorHeight),
+            cursorPaint,
+          );
+        }
       }
     }
 
@@ -153,7 +180,8 @@ class EditorPainter extends CustomPainter {
         Paint()..color = MostromoTheme.backgroundColor,
       );
       canvas.translate(32, 32);
-      drawContent();
+      // Serbest modda sonsuz sınır veriyoruz
+      drawContent(0, double.infinity);
     } else {
       for (int i = 0; i < layout.totalPages; i++) {
         canvas.save();
@@ -184,24 +212,36 @@ class EditorPainter extends CustomPainter {
         );
 
         double startLogicalY = layout.pageBreaks[i];
-        double contentHeightForThisPage = (i + 1 < layout.pageBreaks.length)
-            ? (layout.pageBreaks[i + 1] - startLogicalY)
-            : (layout.logicalHeight - startLogicalY);
+        double endLogicalY = (i + 1 < layout.pageBreaks.length)
+            ? layout.pageBreaks[i + 1]
+            : layout.logicalHeight;
+        double contentHeightForThisPage = endLogicalY - startLogicalY;
+
+        // 🌟 KANAMA KORUMASI (Bleed Protection)
+        // 5 piksel hayat kurtarır.
+        // 1. Üstten 5 piksel kısaltıyoruz ki önceki sayfanın g, ş, y gibi sarkan kuyrukları gizlensin.
+        // 2. Alttan 5 piksel uzatıyoruz ki bu sayfanın son satırındaki kuyruklar temizce çizilsin.
+        double bleedPadding = 5.0;
+        double topClipOffset = (i > 0) ? bleedPadding : 0.0;
+        double bottomClipOffset = bleedPadding;
 
         Rect printableRect = Rect.fromLTWH(
           layout.marginLeft,
-          pageTop + layout.marginTop,
+          pageTop + layout.marginTop + topClipOffset,
           layout.a4Width - layout.marginLeft - layout.marginRight,
-          contentHeightForThisPage,
+          contentHeightForThisPage - topClipOffset + bottomClipOffset,
         );
 
-        canvas.clipRect(printableRect.inflate(30.0));
+        canvas.clipRect(printableRect);
+
         canvas.translate(
           layout.marginLeft,
           pageTop + layout.marginTop - startLogicalY,
         );
 
-        drawContent();
+        // UI çizim fonksiyonuna bu sayfanın geçerli sınırlarını gönder
+        drawContent(startLogicalY, endLogicalY);
+
         canvas.restore();
       }
     }

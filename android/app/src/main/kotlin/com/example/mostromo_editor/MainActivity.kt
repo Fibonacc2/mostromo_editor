@@ -11,39 +11,39 @@ import java.io.FileOutputStream
 
 class MainActivity: FlutterActivity() {
     private val CHANNEL = "mostromo/file_intent"
-    private var initialFilePath: String? = null
+    private var pendingFilePath: String? = null 
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        handleIntent(intent)
+        // Uygulama tamamen kapalıyken gelen intent'i yakala
+        pendingFilePath = handleIntent(intent)
     }
 
-    // Uygulama arka planda açıkken dosyaya tıklanırsa tetiklenir
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        handleIntent(intent)
-        
-        initialFilePath?.let {
-            flutterEngine?.dartExecutor?.binaryMessenger?.let { messenger ->
-                MethodChannel(messenger, CHANNEL).invokeMethod("onFileOpened", it)
+        val path = handleIntent(intent)
+        // Uygulama arka planda açıkken gelen dosyayı hemen Flutter'a bildir
+        if (path != null) {
+            flutterEngine?.dartExecutor?.binaryMessenger?.let {
+                MethodChannel(it, CHANNEL).invokeMethod("onFileOpened", path)
             }
         }
     }
 
-    private fun handleIntent(intent: Intent) {
+    private fun handleIntent(intent: Intent): String? {
         if (Intent.ACTION_VIEW == intent.action) {
             val uri: Uri? = intent.data
             if (uri != null) {
-                initialFilePath = copyToCache(uri) // Dart'ın okuyabilmesi için çevir!
+                return copyToCache(uri)
             }
         }
+        return null
     }
 
-    // 🌟 SİHİRLİ KISIM: content:// şifreli yolunu kırıp fiziksel dosyaya dönüştürür
     private fun copyToCache(uri: Uri): String? {
         try {
             val inputStream = contentResolver.openInputStream(uri) ?: return null
-            // Önbellekte geçici bir Mostromo dosyası oluştur
+            // Geçici dosyayı oluştur
             val tempFile = File(cacheDir, "external_note_${System.currentTimeMillis()}.mostromo")
             val outputStream = FileOutputStream(tempFile)
             inputStream.copyTo(outputStream)
@@ -51,17 +51,19 @@ class MainActivity: FlutterActivity() {
             outputStream.close()
             return tempFile.absolutePath
         } catch (e: Exception) {
+            e.printStackTrace()
             return null
         }
     }
 
-    // Flutter ile iletişime geçiş
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        
+        // Flutter hazır olduğunda kanalı kur ve bekleyen dosya varsa gönder
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             if (call.method == "getInitialFile") {
-                result.success(initialFilePath)
-                initialFilePath = null // Okunduktan sonra temizle
+                result.success(pendingFilePath)
+                pendingFilePath = null // İşlem bitti, temizle
             } else {
                 result.notImplemented()
             }

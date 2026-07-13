@@ -48,7 +48,10 @@ class PageLayout {
             : logicalHeight) -
         pageBreaks[pageIndex];
 
+    // Üst kenar boşluğuna tıklanırsa, sayfanın en başına sabitle
     if (offsetInPrintable < 0) offsetInPrintable = 0;
+
+    // Alt kenar boşluğuna tıklanırsa, o sayfadaki en son satıra sabitle
     if (offsetInPrintable > maxContentOnPage) {
       offsetInPrintable = maxContentOnPage;
     }

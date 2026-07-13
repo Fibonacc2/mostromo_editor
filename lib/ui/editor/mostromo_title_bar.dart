@@ -1,9 +1,9 @@
 import 'dart:io';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
+
 import '../../core/app_theme.dart';
 import '../../providers/editor_provider.dart';
 import '../../providers/block_editor_provider.dart';
@@ -16,9 +16,12 @@ class MostromoTitleBar extends StatelessWidget {
   final TextEditingController? titleController;
   final VoidCallback? onSave;
   final VoidCallback onClose;
-
   final bool isExternal;
   final VoidCallback? onImport;
+
+  // 🌟 YENİ: Okuma Modu Değişkenleri
+  final bool isReadingMode;
+  final VoidCallback? onToggleReadingMode;
 
   const MostromoTitleBar({
     super.key,
@@ -31,6 +34,8 @@ class MostromoTitleBar extends StatelessWidget {
     required this.onClose,
     this.isExternal = false,
     this.onImport,
+    this.isReadingMode = false, // 🌟 YENİ
+    this.onToggleReadingMode, // 🌟 YENİ
   });
 
   @override
@@ -64,7 +69,9 @@ class MostromoTitleBar extends StatelessWidget {
                   child: TextField(
                     controller: titleController,
                     textAlign: TextAlign.center,
-                    readOnly: isExternal,
+                    readOnly:
+                        isExternal ||
+                        isReadingMode, // 🌟 Okuma modunda başlık da değişmesin
                     cursorColor: MostromoTheme.accentColor,
                     style: TextStyle(
                       color: isExternal ? Colors.white54 : Colors.white,
@@ -78,9 +85,10 @@ class MostromoTitleBar extends StatelessWidget {
                     ),
                   ),
                 ),
-
-              if (!isExternal && onSave != null) _buildDynamicSaveIcon(),
-
+              if (!isExternal && onToggleReadingMode != null)
+                _buildReadModeIcon(), // 🌟 YENİ
+              if (!isExternal && onSave != null && !isReadingMode)
+                _buildDynamicSaveIcon(),
               const Spacer(),
               const SizedBox(width: 48),
             ],
@@ -100,13 +108,14 @@ class MostromoTitleBar extends StatelessWidget {
               size: 20,
             ),
             const SizedBox(width: 16),
-
             if (isEditor && !isBlockMode && !isExternal) ...[
               Consumer<EditorProvider>(
                 builder: (context, provider, _) => IconButton(
                   icon: const Icon(Icons.undo_rounded, size: 18),
-                  color: provider.canUndo ? Colors.white : Colors.white24,
-                  onPressed: provider.canUndo
+                  color: provider.canUndo && !isReadingMode
+                      ? Colors.white
+                      : Colors.white24,
+                  onPressed: provider.canUndo && !isReadingMode
                       ? () => provider.executeUndo()
                       : null,
                   tooltip: 'Geri Al (Ctrl+Z)',
@@ -115,8 +124,10 @@ class MostromoTitleBar extends StatelessWidget {
               Consumer<EditorProvider>(
                 builder: (context, provider, _) => IconButton(
                   icon: const Icon(Icons.redo_rounded, size: 18),
-                  color: provider.canRedo ? Colors.white : Colors.white24,
-                  onPressed: provider.canRedo
+                  color: provider.canRedo && !isReadingMode
+                      ? Colors.white
+                      : Colors.white24,
+                  onPressed: provider.canRedo && !isReadingMode
                       ? () => provider.executeRedo()
                       : null,
                   tooltip: 'İleri Al (Ctrl+Shift+Z)',
@@ -136,7 +147,7 @@ class MostromoTitleBar extends StatelessWidget {
             ] else ...[
               Text(
                 isExternal
-                    ? 'Korumalı Görünüm (Sadece Okunur)'
+                    ? 'Korumalı Mod (Sadece Okunur)'
                     : 'Mostromo Workspace',
                 style: TextStyle(
                   color: isExternal ? Colors.orangeAccent : Colors.white38,
@@ -146,9 +157,7 @@ class MostromoTitleBar extends StatelessWidget {
                 ),
               ),
             ],
-
             const Expanded(child: DragToMoveArea(child: SizedBox.expand())),
-
             if (isEditor && titleController != null)
               Row(
                 mainAxisSize: MainAxisSize.min,
@@ -158,7 +167,9 @@ class MostromoTitleBar extends StatelessWidget {
                     child: TextField(
                       controller: titleController,
                       textAlign: TextAlign.center,
-                      readOnly: isExternal,
+                      readOnly:
+                          isExternal ||
+                          isReadingMode, // 🌟 Okuma modunda başlık da değişmesin
                       cursorColor: MostromoTheme.accentColor,
                       style: TextStyle(
                         color: isExternal ? Colors.white54 : Colors.white,
@@ -195,13 +206,13 @@ class MostromoTitleBar extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 12),
-
-                  if (!isExternal && onSave != null) _buildDynamicSaveIcon(),
+                  if (!isExternal && onToggleReadingMode != null)
+                    _buildReadModeIcon(), // 🌟 YENİ
+                  if (!isExternal && onSave != null && !isReadingMode)
+                    _buildDynamicSaveIcon(),
                 ],
               ),
-
             const Expanded(child: DragToMoveArea(child: SizedBox.expand())),
-
             _buildWindowButton(
               Icons.minimize_rounded,
               () => windowManager.minimize(),
@@ -224,6 +235,26 @@ class MostromoTitleBar extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [topBar, _buildProtectedViewBanner(isMobile)],
+    );
+  }
+
+  // 🌟 YENİ: Okuma Modu İkonu
+  Widget _buildReadModeIcon() {
+    return Tooltip(
+      message: isReadingMode ? 'Düzenleme Moduna Geç' : 'Okuma Moduna Geç',
+      child: InkWell(
+        onTap: onToggleReadingMode,
+        borderRadius: BorderRadius.circular(6),
+        hoverColor: Colors.white.withValues(alpha: 0.1),
+        child: Padding(
+          padding: const EdgeInsets.all(6.0),
+          child: Icon(
+            isReadingMode ? Icons.menu_book_rounded : Icons.edit_note_rounded,
+            color: isReadingMode ? Colors.greenAccent : Colors.white54,
+            size: 18,
+          ),
+        ),
+      ),
     );
   }
 
