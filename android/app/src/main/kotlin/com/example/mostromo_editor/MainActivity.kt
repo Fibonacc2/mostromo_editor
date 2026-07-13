@@ -1,4 +1,4 @@
-package com.example.mostromo_editor
+package com.example.mostromo_editor // Kendi paket adınla değiştirmeyi unutma!
 
 import android.content.Intent
 import android.net.Uri
@@ -11,18 +11,27 @@ import java.io.FileOutputStream
 
 class MainActivity: FlutterActivity() {
     private val CHANNEL = "mostromo/file_intent"
-    private var pendingFilePath: String? = null 
+    private var startupRoute: String = "/" // Varsayılan rota ana ekran
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Flutter uyanmadan önce intent'i kontrol et
+        val path = handleIntent(intent)
+        if (path != null) {
+            // Eğer bir dosya açılıyorsa, Flutter'ın ilk açacağı sayfayı /reader olarak ayarla!
+            startupRoute = "/reader?path=${Uri.encode(path)}"
+        }
         super.onCreate(savedInstanceState)
-        // Uygulama tamamen kapalıyken gelen intent'i yakala
-        pendingFilePath = handleIntent(intent)
+    }
+
+    // 🌟 KİLİT ÇÖZÜM: GoRouter "Uygulama açıldı, nereye gideyim?" dediğinde cevabımız:
+    override fun getInitialRoute(): String {
+        return startupRoute 
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        // Uygulama ZATEN AÇIKKEN yeni bir dosyaya tıklanırsa
         val path = handleIntent(intent)
-        // Uygulama arka planda açıkken gelen dosyayı hemen Flutter'a bildir
         if (path != null) {
             flutterEngine?.dartExecutor?.binaryMessenger?.let {
                 MethodChannel(it, CHANNEL).invokeMethod("onFileOpened", path)
@@ -43,7 +52,6 @@ class MainActivity: FlutterActivity() {
     private fun copyToCache(uri: Uri): String? {
         try {
             val inputStream = contentResolver.openInputStream(uri) ?: return null
-            // Geçici dosyayı oluştur
             val tempFile = File(cacheDir, "external_note_${System.currentTimeMillis()}.mostromo")
             val outputStream = FileOutputStream(tempFile)
             inputStream.copyTo(outputStream)
@@ -58,15 +66,7 @@ class MainActivity: FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        
-        // Flutter hazır olduğunda kanalı kur ve bekleyen dosya varsa gönder
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
-            if (call.method == "getInitialFile") {
-                result.success(pendingFilePath)
-                pendingFilePath = null // İşlem bitti, temizle
-            } else {
-                result.notImplemented()
-            }
-        }
+        // Artık "getInitialFile" metoduna gerek kalmadı çünkü getInitialRoute ile işi hallettik, 
+        // ancak "onFileOpened" (uygulama açıkken tıklanma) için kanal açık kalmalı.
     }
 }

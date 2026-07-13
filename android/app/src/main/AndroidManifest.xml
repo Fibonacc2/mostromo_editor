@@ -85,23 +85,34 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
             
-            <!-- .mro ve .mrb Dosyaları İçin Birlikte Aç Filtresi -->
+            <!-- 🌟 2. FİLTRE: Geleneksel Dosya Yöneticileri (file://) İçin -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 
-                <!-- Dosya yöneticisi ve içerik sağlayıcılardan gelen verileri yakalar -->
                 <data android:scheme="file" />
-                <data android:scheme="content" />
-                
-                <!-- Genel mime-type kullanarak sistemin dosyayı bize yönlendirmesini sağlar -->
-                <data android:mimeType="application/octet-stream" />
-                
-                <!-- Uzantı bazlı daha kesin eşleştirme -->
                 <data android:host="*" />
+                <data android:mimeType="*/*" />
+                
+                <!-- .mro ve .mrb yakalayıcıları -->
                 <data android:pathPattern=".*\\.mro" />
                 <data android:pathPattern=".*\\.mrb" />
+                <!-- Klasör yollarında nokta olma ihtimaline karşı yedekler -->
+                <data android:pathPattern=".*\\..*\\.mro" />
+                <data android:pathPattern=".*\\..*\\.mrb" />
+            </intent-filter>
+
+            <!-- 🌟 3. FİLTRE: Modern Dosya Yöneticileri ve WhatsApp/Mail (content://) İçin -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                
+                <data android:scheme="content" />
+                <!-- Android, uzantısını bilmediği dosyalara genelde bu iki tipi atar -->
+                <data android:mimeType="application/octet-stream" />
+                <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
         
