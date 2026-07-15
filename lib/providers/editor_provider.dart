@@ -628,18 +628,33 @@ class EditorProvider extends ChangeNotifier {
   }
 
   void applyTextAlign(TextAlign alignment) {
-    if (hasSelection) {
-      int start = math.min(selectionBase!, cursorIndex);
-      int end = math.max(selectionBase!, cursorIndex);
-      engine.formatText(start, end - start, textAlign: alignment);
-    } else {
-      String text = engine.getText();
-      int start =
-          text.lastIndexOf('\n', cursorIndex > 0 ? cursorIndex - 1 : 0) + 1;
-      int end = text.indexOf('\n', cursorIndex);
-      if (end == -1) end = text.length;
-      engine.formatText(start, end - start, textAlign: alignment);
+    String text = engine.getText();
+    if (text.isEmpty) {
+      engine.formatText(0, 0, textAlign: alignment);
+      setDirty();
+      notifyListeners();
+      return;
     }
+
+    // İmlecin veya seçimin başlangıç ve bitiş noktalarını bul
+    int baseIndex = hasSelection
+        ? math.min(selectionBase!, cursorIndex)
+        : cursorIndex;
+    int extIndex = hasSelection
+        ? math.max(selectionBase!, cursorIndex)
+        : cursorIndex;
+
+    // Bulunan satırın (paragrafın) başını bul
+    int start = text.lastIndexOf('\n', baseIndex > 0 ? baseIndex - 1 : 0) + 1;
+    if (start < 0) start = 0;
+
+    // Bulunan satırın (paragrafın) sonunu bul
+    int end = text.indexOf('\n', extIndex);
+    if (end == -1) end = text.length;
+
+    // Tüm paragraf aralığına hizalamayı bas
+    engine.formatText(start, end - start, textAlign: alignment);
+
     setDirty();
     notifyListeners();
   }

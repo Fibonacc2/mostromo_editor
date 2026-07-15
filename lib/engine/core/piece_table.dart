@@ -257,6 +257,97 @@ class PieceTable {
     return spans;
   }
 
+  List<ParagraphBlock> getParagraphBlocks() {
+    List<ParagraphBlock> blocks = [];
+    List<TextSpan> currentSpans = [];
+    int currentStartOffset = 0;
+    int currentLength = 0;
+    TextAlign currentAlign = TextAlign.left;
+    bool isFirstPieceInParagraph = true;
+
+    for (final piece in _pieces) {
+      String pieceText = (piece.buffer == BufferType.original)
+          ? _originalBuffer.substring(piece.start, piece.start + piece.length)
+          : _addBuffer.substring(piece.start, piece.start + piece.length);
+
+      final style = piece.style ?? MostromoStyle();
+      if (isFirstPieceInParagraph) {
+        currentAlign = style.textAlign ?? TextAlign.left;
+        isFirstPieceInParagraph = false;
+      }
+
+      final bool hasImage = style.imageBase64 != null;
+      final double letterSpacing = hasImage ? (style.imageWidth ?? 300.0) : 0.0;
+      final double fontSize = hasImage
+          ? (style.imageHeight ?? 200.0)
+          : (style.fontSize ?? 16.0);
+      final bool hasLink = style.linkUrl != null;
+
+      TextStyle textStyle = TextStyle(
+        fontFamily: style.fontFamily,
+        fontWeight: style.isBold ? FontWeight.bold : FontWeight.normal,
+        fontStyle: style.isItalic ? FontStyle.italic : FontStyle.normal,
+        decoration: (style.isUnderline || hasLink) && !hasImage
+            ? TextDecoration.underline
+            : TextDecoration.none,
+        color: hasImage
+            ? Colors.transparent
+            : (hasLink ? Colors.blueAccent : (style.color ?? Colors.white)),
+        fontSize: fontSize,
+        letterSpacing: letterSpacing,
+      );
+
+      int searchIndex = 0;
+      while (true) {
+        int nlIndex = pieceText.indexOf('\n', searchIndex);
+        if (nlIndex == -1) {
+          // Bu parça içinde başka satır sonu (Enter) yok, kalanını ekle
+          String rest = pieceText.substring(searchIndex);
+          if (rest.isNotEmpty) {
+            currentSpans.add(TextSpan(text: rest, style: textStyle));
+            currentLength += rest.length;
+          }
+          break;
+        } else {
+          // Satır sonu (Enter) bulduk, paragrafı kapat
+          String part = pieceText.substring(searchIndex, nlIndex);
+          if (part.isNotEmpty) {
+            currentSpans.add(TextSpan(text: part, style: textStyle));
+            currentLength += part.length;
+          }
+          currentLength += 1; // '\n' karakterinin kendisi için
+
+          blocks.add(
+            ParagraphBlock(
+              spans: currentSpans,
+              textAlign: currentAlign,
+              startOffset: currentStartOffset,
+              length: currentLength,
+            ),
+          );
+
+          currentStartOffset += currentLength;
+          currentSpans = [];
+          currentLength = 0;
+          currentAlign = style.textAlign ?? TextAlign.left;
+          searchIndex = nlIndex + 1;
+        }
+      }
+    }
+
+    // Son kalan paragrafı da ekle (Boş olsa bile imleç için gereklidir)
+    blocks.add(
+      ParagraphBlock(
+        spans: currentSpans,
+        textAlign: currentAlign,
+        startOffset: currentStartOffset,
+        length: currentLength,
+      ),
+    );
+
+    return blocks;
+  }
+
   String getText() {
     final StringBuffer result = StringBuffer();
     for (final piece in _pieces) {
@@ -311,4 +402,18 @@ class PieceTable {
     }
     return restoredTable;
   }
+}
+
+class ParagraphBlock {
+  final List<TextSpan> spans;
+  final TextAlign textAlign;
+  final int startOffset;
+  final int length;
+
+  ParagraphBlock({
+    required this.spans,
+    required this.textAlign,
+    required this.startOffset,
+    required this.length,
+  });
 }

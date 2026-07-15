@@ -4,8 +4,26 @@ import 'dart:math' as math;
 import '../../core/app_theme.dart';
 import 'page_layout.dart';
 
+// 🌟 YENİ: Paragrafların ekrandaki konumlarını tutan iletişim sınıfı
+class PaintedParagraph {
+  final TextPainter painter;
+  final int startOffset;
+  final int length;
+  final double dy;
+  final double height;
+
+  PaintedParagraph({
+    required this.painter,
+    required this.startOffset,
+    required this.length,
+    required this.dy,
+    required this.height,
+  });
+}
+
 class EditorPainter extends CustomPainter {
-  final TextPainter textPainter;
+  final List<PaintedParagraph>
+  paragraphs; // 🌟 YENİ: Tek TextPainter yerine Paragraf Listesi
   final PageLayout layout;
   final int plainTextLength;
   final int cursorIndex;
@@ -16,7 +34,7 @@ class EditorPainter extends CustomPainter {
   final bool isMobile;
 
   EditorPainter({
-    required this.textPainter,
+    required this.paragraphs,
     required this.layout,
     required this.plainTextLength,
     required this.cursorIndex,
@@ -29,148 +47,123 @@ class EditorPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    // 🌟 YENİ: Çizim metodumuz artık "Bu sayfanın başlangıç ve bitiş sınırları ne?" diye soruyor.
     void drawContent(double logicalStart, double logicalEnd) {
-      // 1. SEÇİM (SELECTION) ÇİZİMİ
-      if (selectionBase != null && selectionBase != cursorIndex) {
-        final start = math.min(selectionBase!, cursorIndex);
-        final end = math.max(selectionBase!, cursorIndex);
-        final boxes = textPainter.getBoxesForSelection(
-          TextSelection(baseOffset: start, extentOffset: end),
-        );
-        final selectionPaint = Paint()
-          ..color = MostromoTheme.accentColor.withValues(alpha: 0.3);
-
-        List<ui.TextBox> validBoxes = [];
-        for (final box in boxes) {
-          // Kutunun merkez (orta) noktasını bul
-          double boxCenter = box.top + (box.bottom - box.top) / 2;
-
-          // Eğer kutunun merkezi bu sayfanın sınırları içindeyse çiz! (Hayalet kutuları engeller)
-          if (!layout.isPageMode ||
-              (boxCenter >= logicalStart && boxCenter <= logicalEnd)) {
-            canvas.drawRect(box.toRect(), selectionPaint);
-            validBoxes.add(box);
-          }
+      for (var p in paragraphs) {
+        // Bu paragraf şu an çizilen sayfa sınırlarının tamamen dışındaysa es geç (Optimizasyon)
+        if (layout.isPageMode &&
+            (p.dy + p.height < logicalStart || p.dy > logicalEnd)) {
+          continue;
         }
 
-        if (isMobile && validBoxes.isNotEmpty) {
-          final handlePaint = Paint()..color = MostromoTheme.accentColor;
+        canvas.save();
+        canvas.translate(0, p.dy); // Kalemi paragrafın Y konumuna kaydır
 
-          final firstBox = validBoxes.first;
-          final leftBottom = Offset(firstBox.left, firstBox.bottom);
-          canvas.drawCircle(
-            Offset(leftBottom.dx, leftBottom.dy + 6),
-            7,
-            handlePaint,
-          );
-          canvas.drawLine(
-            Offset(firstBox.left, firstBox.top),
-            leftBottom,
-            handlePaint..strokeWidth = 2,
-          );
+        // 1. SEÇİM (SELECTION) ÇİZİMİ
+        if (selectionBase != null && selectionBase != cursorIndex) {
+          int start = math.min(selectionBase!, cursorIndex);
+          int end = math.max(selectionBase!, cursorIndex);
 
-          final lastBox = validBoxes.last;
-          final rightBottom = Offset(lastBox.right, lastBox.bottom);
-          canvas.drawCircle(
-            Offset(rightBottom.dx, rightBottom.dy + 6),
-            7,
-            handlePaint,
-          );
-          canvas.drawLine(
-            Offset(lastBox.right, lastBox.top),
-            rightBottom,
-            handlePaint..strokeWidth = 2,
-          );
-        }
-      }
+          // Seçim bu paragrafın içine taşıyor mu?
+          if (end >= p.startOffset && start <= p.startOffset + p.length) {
+            int localStart = math.max(0, start - p.startOffset);
+            int localEnd = math.min(p.length, end - p.startOffset);
 
-      // 2. METNİN KENDİSİNİ ÇİZ
-      textPainter.paint(canvas, Offset.zero);
+            final boxes = p.painter.getBoxesForSelection(
+              TextSelection(baseOffset: localStart, extentOffset: localEnd),
+            );
+            final selectionPaint = Paint()
+              ..color = MostromoTheme.accentColor.withValues(alpha: 0.3);
 
-      // 3. RESİMLERİ ÇİZ
-      if (imageCache.isNotEmpty) {
-        final paint = Paint()..filterQuality = FilterQuality.high;
-        imageCache.forEach((offsetIndex, uiImage) {
-          final boxes = textPainter.getBoxesForSelection(
-            TextSelection(
-              baseOffset: offsetIndex,
-              extentOffset: offsetIndex + 1,
-            ),
-          );
-          if (boxes.isNotEmpty) {
-            final rect = boxes.first.toRect();
-            double boxCenter = rect.top + (rect.height / 2);
-
-            if (!layout.isPageMode ||
-                (boxCenter >= logicalStart && boxCenter <= logicalEnd)) {
-              canvas.drawImageRect(
-                uiImage,
-                Rect.fromLTWH(
-                  0,
-                  0,
-                  uiImage.width.toDouble(),
-                  uiImage.height.toDouble(),
-                ),
-                rect,
-                paint,
-              );
+            for (final box in boxes) {
+              canvas.drawRect(box.toRect(), selectionPaint);
             }
           }
-        });
-      }
+        }
 
-      // 4. İMLECİ (CURSOR) ÇİZ
-      if (showCursor &&
-          (selectionBase == null || selectionBase == cursorIndex)) {
-        final caretOffset = textPainter.getOffsetForCaret(
-          TextPosition(offset: cursorIndex, affinity: TextAffinity.downstream),
-          Rect.zero,
-        );
-        final cursorPaint = Paint()
-          ..color = MostromoTheme.accentColor
-          ..strokeWidth = 2.0;
-        double cursorHeight = currentFontSize * 1.15;
-        double cursorTop = caretOffset.dy;
+        // 2. PARAGRAFIN KENDİSİNİ ÇİZ (Sola, sağa veya ortaya yaslı olarak)
+        p.painter.paint(canvas, Offset.zero);
 
-        int leftIndex = cursorIndex - 1;
-        int rightIndex = cursorIndex;
-        Rect? validBox;
+        // 3. RESİMLERİ ÇİZ
+        if (imageCache.isNotEmpty) {
+          final paint = Paint()..filterQuality = FilterQuality.high;
+          imageCache.forEach((offsetIndex, uiImage) {
+            if (offsetIndex >= p.startOffset &&
+                offsetIndex < p.startOffset + p.length) {
+              int localOffset = offsetIndex - p.startOffset;
+              final boxes = p.painter.getBoxesForSelection(
+                TextSelection(
+                  baseOffset: localOffset,
+                  extentOffset: localOffset + 1,
+                ),
+              );
+              if (boxes.isNotEmpty) {
+                final rect = boxes.first.toRect();
+                canvas.drawImageRect(
+                  uiImage,
+                  Rect.fromLTWH(
+                    0,
+                    0,
+                    uiImage.width.toDouble(),
+                    uiImage.height.toDouble(),
+                  ),
+                  rect,
+                  paint,
+                );
+              }
+            }
+          });
+        }
 
-        if (leftIndex >= 0 && leftIndex < plainTextLength) {
-          final leftBoxes = textPainter.getBoxesForSelection(
-            TextSelection(baseOffset: leftIndex, extentOffset: leftIndex + 1),
-          );
-          if (leftBoxes.isNotEmpty &&
-              (leftBoxes.last.top - cursorTop).abs() < 5.0) {
-            validBox = leftBoxes.last.toRect();
+        // 4. İMLECİ (CURSOR) ÇİZ
+        if (showCursor &&
+            (selectionBase == null || selectionBase == cursorIndex)) {
+          if (cursorIndex >= p.startOffset &&
+              cursorIndex <= p.startOffset + p.length) {
+            // Sadece imlecin tam olarak bulunduğu paragrafta çiz.
+            // '\n' sınırlarında imlecin çift çizilmesini önlemek için:
+            if (cursorIndex == p.startOffset + p.length &&
+                p.length > 0 &&
+                p != paragraphs.last) {
+              // Eğer paragrafın en sonundaysa ve son paragraf değilse (enter atılmışsa), imleci bir sonraki boş paragrafta çizdir.
+              canvas.restore();
+              continue;
+            }
+
+            int localCursor = cursorIndex - p.startOffset;
+            final caretOffset = p.painter.getOffsetForCaret(
+              TextPosition(
+                offset: localCursor,
+                affinity: TextAffinity.downstream,
+              ),
+              Rect.zero,
+            );
+
+            final cursorPaint = Paint()
+              ..color = MostromoTheme.accentColor
+              ..strokeWidth = 2.0;
+            double cursorHeight = currentFontSize * 1.15;
+            double cursorTop = caretOffset.dy;
+
+            // İmleç yüksekliği düzeltmesi
+            final boxes = p.painter.getBoxesForSelection(
+              TextSelection(
+                baseOffset: math.max(0, localCursor - 1),
+                extentOffset: localCursor,
+              ),
+            );
+            if (boxes.isNotEmpty) {
+              cursorTop = boxes.last.top;
+              cursorHeight = boxes.last.toRect().height;
+            }
+
+            canvas.drawLine(
+              Offset(caretOffset.dx, cursorTop),
+              Offset(caretOffset.dx, cursorTop + cursorHeight),
+              cursorPaint,
+            );
           }
         }
-        if (validBox == null && rightIndex < plainTextLength) {
-          final rightBoxes = textPainter.getBoxesForSelection(
-            TextSelection(baseOffset: rightIndex, extentOffset: rightIndex + 1),
-          );
-          if (rightBoxes.isNotEmpty &&
-              (rightBoxes.first.top - cursorTop).abs() < 5.0) {
-            validBox = rightBoxes.first.toRect();
-          }
-        }
-
-        if (validBox != null) {
-          cursorTop = validBox.top;
-          cursorHeight = validBox.height;
-        }
-
-        // 🌟 İMLEÇ KORUMASI: İmlecin merkezi bu sayfada mı?
-        double cursorCenter = cursorTop + (cursorHeight / 2);
-        if (!layout.isPageMode ||
-            (cursorCenter >= logicalStart && cursorCenter <= logicalEnd)) {
-          canvas.drawLine(
-            Offset(caretOffset.dx, cursorTop),
-            Offset(caretOffset.dx, cursorTop + cursorHeight),
-            cursorPaint,
-          );
-        }
+        canvas.restore();
       }
     }
 
@@ -180,7 +173,6 @@ class EditorPainter extends CustomPainter {
         Paint()..color = MostromoTheme.backgroundColor,
       );
       canvas.translate(32, 32);
-      // Serbest modda sonsuz sınır veriyoruz
       drawContent(0, double.infinity);
     } else {
       for (int i = 0; i < layout.totalPages; i++) {
@@ -217,10 +209,6 @@ class EditorPainter extends CustomPainter {
             : layout.logicalHeight;
         double contentHeightForThisPage = endLogicalY - startLogicalY;
 
-        // 🌟 KANAMA KORUMASI (Bleed Protection)
-        // 5 piksel hayat kurtarır.
-        // 1. Üstten 5 piksel kısaltıyoruz ki önceki sayfanın g, ş, y gibi sarkan kuyrukları gizlensin.
-        // 2. Alttan 5 piksel uzatıyoruz ki bu sayfanın son satırındaki kuyruklar temizce çizilsin.
         double bleedPadding = 5.0;
         double topClipOffset = (i > 0) ? bleedPadding : 0.0;
         double bottomClipOffset = bleedPadding;
@@ -233,15 +221,12 @@ class EditorPainter extends CustomPainter {
         );
 
         canvas.clipRect(printableRect);
-
         canvas.translate(
           layout.marginLeft,
           pageTop + layout.marginTop - startLogicalY,
         );
 
-        // UI çizim fonksiyonuna bu sayfanın geçerli sınırlarını gönder
         drawContent(startLogicalY, endLogicalY);
-
         canvas.restore();
       }
     }

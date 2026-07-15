@@ -46,6 +46,7 @@ class _MobileEditorWidgetState extends State<MobileEditorWidget> {
   int _dragAnchorIndex = 0;
   bool _isDraggingHandle = false;
 
+  List<PaintedParagraph>? _cachedParagraphs;
   TextPainter? _cachedTextPainter;
   PageLayout? _cachedLayout;
   OverlayEntry? _miniToolbarEntry;
@@ -531,7 +532,7 @@ class _MobileEditorWidgetState extends State<MobileEditorWidget> {
                   child: CustomPaint(
                     size: Size(_currentMaxWidth, customPaintHeight),
                     painter: EditorPainter(
-                      textPainter: _cachedTextPainter!,
+                      paragraphs: _cachedParagraphs!,
                       layout: _cachedLayout!,
                       plainTextLength: provider.engine.getText().length,
                       cursorIndex: provider.cursorIndex,

@@ -26,6 +26,13 @@ class DesktopEditorWidget extends StatefulWidget {
   State<DesktopEditorWidget> createState() => _DesktopEditorWidgetState();
 }
 
+class _LineData {
+  final PaintedParagraph paragraph;
+  final double y;
+  final double height;
+  _LineData(this.paragraph, this.y, this.height);
+}
+
 class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
   late FocusNode _focusNode;
   double _currentMaxWidth = 1000.0;
@@ -40,6 +47,7 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
   bool? _cachedIsPageMode;
 
   TextPainter? _cachedTextPainter;
+  List<PaintedParagraph>? _cachedParagraphs;
   PageLayout? _cachedLayout;
   OverlayEntry? _miniToolbarEntry;
 
@@ -126,37 +134,58 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
     });
   }
 
-  TextPainter _buildPainter(
+  List<PaintedParagraph> _buildPainters(
     EditorProvider provider,
     double maxWidth,
     double mLeft,
     double mRight,
   ) {
-    List<TextSpan> combinedSpans = List.from(
-      provider.engine.getRichTextSpans(),
-    );
-    combinedSpans.add(
-      TextSpan(
-        text: '\u200B',
-        style: TextStyle(fontSize: provider.currentFontSize ?? 16.0),
-      ),
-    );
-    final textSpan = TextSpan(
-      children: combinedSpans,
-      style: const TextStyle(color: Colors.white, fontSize: 16),
-    );
-
+    List<PaintedParagraph> paragraphs = [];
     double printableWidth = provider.isPageMode
         ? maxWidth - mLeft - mRight
         : maxWidth - 64;
     if (printableWidth < 100) printableWidth = 100;
 
-    return TextPainter(text: textSpan, textDirection: TextDirection.ltr)
-      ..layout(minWidth: 0, maxWidth: printableWidth);
+    final blocks = provider.engine.getParagraphBlocks();
+    double currentY = 0.0;
+
+    for (var block in blocks) {
+      List<TextSpan> spans = List.from(block.spans);
+      // Boş satırlara bile tıklayabilmek için görünmez yükseklik (0 width space) ekliyoruz
+      spans.add(
+        TextSpan(
+          text: '\u200B',
+          style: TextStyle(fontSize: provider.currentFontSize ?? 16.0),
+        ),
+      );
+
+      final textSpan = TextSpan(
+        children: spans,
+        style: const TextStyle(color: Colors.white, fontSize: 16),
+      );
+      final painter = TextPainter(
+        text: textSpan,
+        textDirection: TextDirection.ltr,
+        textAlign: block.textAlign, // 🌟 İŞTE HİZALAMA BURADA UYGULANIYOR!
+      )..layout(minWidth: 0, maxWidth: printableWidth);
+
+      paragraphs.add(
+        PaintedParagraph(
+          painter: painter,
+          startOffset: block.startOffset,
+          length: block.length,
+          dy: currentY,
+          height: painter.height,
+        ),
+      );
+
+      currentY += painter.height;
+    }
+    return paragraphs;
   }
 
   PageLayout _computeLayout(
-    TextPainter textPainter,
+    List<PaintedParagraph> paragraphs,
     EditorProvider provider,
     double maxWidth,
     double mLeft,
@@ -168,6 +197,9 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
     double pageGap = 32.0;
 
     if (!provider.isPageMode) {
+      double totalH = paragraphs.isNotEmpty
+          ? (paragraphs.last.dy + paragraphs.last.height)
+          : 0;
       return PageLayout(
         isPageMode: false,
         a4Width: maxWidth,
@@ -178,7 +210,7 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
         marginLeft: 32,
         marginRight: 32,
         pageBreaks: [0.0],
-        logicalHeight: textPainter.height + 64,
+        logicalHeight: totalH + 64,
       );
     }
 
@@ -189,15 +221,17 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
     double currentSubHeight = 0.0;
     double accumulatedY = 0.0;
 
-    final metrics = textPainter.computeLineMetrics();
-    for (var m in metrics) {
-      if (currentSubHeight + m.height > printableHeight &&
-          currentSubHeight > 0) {
-        breaks.add(accumulatedY);
-        currentSubHeight = 0.0;
+    for (var p in paragraphs) {
+      final metrics = p.painter.computeLineMetrics();
+      for (var m in metrics) {
+        if (currentSubHeight + m.height > printableHeight &&
+            currentSubHeight > 0) {
+          breaks.add(accumulatedY);
+          currentSubHeight = 0.0;
+        }
+        currentSubHeight += m.height;
+        accumulatedY += m.height;
       }
-      currentSubHeight += m.height;
-      accumulatedY += m.height;
     }
 
     return PageLayout(
@@ -214,59 +248,97 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
     );
   }
 
+  int _getOffsetIndex(Offset localPosition, EditorProvider provider) {
+    if (_cachedParagraphs == null || _cachedLayout == null)
+      return provider.cursorIndex;
+
+    double logicalY = _cachedLayout!.physicalToLogicalY(localPosition.dy);
+    double logicalX =
+        localPosition.dx -
+        (provider.isPageMode ? _cachedLayout!.marginLeft : 32.0);
+
+    PaintedParagraph? targetPara;
+    for (var p in _cachedParagraphs!) {
+      if (logicalY >= p.dy && logicalY <= p.dy + p.height) {
+        targetPara = p;
+        break;
+      }
+    }
+
+    if (targetPara == null) {
+      if (logicalY < 0) return 0;
+      return provider.engine.getText().length;
+    }
+
+    final position = targetPara.painter.getPositionForOffset(
+      Offset(logicalX, logicalY - targetPara.dy),
+    );
+    return (targetPara.startOffset + position.offset).clamp(
+      0,
+      provider.engine.getText().length,
+    );
+  }
+
   int _calculateVerticalMove(EditorProvider provider, bool isUp) {
-    if (_cachedTextPainter == null) return provider.cursorIndex;
+    if (_cachedParagraphs == null) return provider.cursorIndex;
     int len = provider.engine.getText().length;
-    final textPainter = _cachedTextPainter!;
-    final currentOffset = textPainter.getOffsetForCaret(
+
+    PaintedParagraph? currentPara;
+    for (var p in _cachedParagraphs!) {
+      if (provider.cursorIndex >= p.startOffset &&
+          provider.cursorIndex <= p.startOffset + p.length) {
+        currentPara = p;
+        break;
+      }
+    }
+    if (currentPara == null) return provider.cursorIndex;
+
+    final currentOffset = currentPara.painter.getOffsetForCaret(
       TextPosition(
-        offset: provider.cursorIndex,
+        offset: provider.cursorIndex - currentPara.startOffset,
         affinity: TextAffinity.downstream,
       ),
       Rect.zero,
     );
 
     _intendedCursorX ??= currentOffset.dx;
-    final metrics = textPainter.computeLineMetrics();
-    if (metrics.isEmpty) return isUp ? 0 : len;
+    double globalCaretY = currentPara.dy + currentOffset.dy;
 
-    double accumulatedY = 0;
-    int currentLineIdx = metrics.length - 1;
-    List<double> lineCenters = [];
-
-    for (int i = 0; i < metrics.length; i++) {
-      double h = metrics[i].height;
-      lineCenters.add(accumulatedY + (h / 2));
-      if (currentLineIdx == metrics.length - 1 &&
-          currentOffset.dy < accumulatedY + h - 1.0) {
-        currentLineIdx = i;
+    List<_LineData> allLines = [];
+    for (var p in _cachedParagraphs!) {
+      final metrics = p.painter.computeLineMetrics();
+      double lineY = p.dy;
+      for (var m in metrics) {
+        allLines.add(_LineData(p, lineY, m.height));
+        lineY += m.height;
       }
-      accumulatedY += h;
     }
 
-    int targetLine = isUp ? currentLineIdx - 1 : currentLineIdx + 1;
-    if (targetLine < 0) return provider.cursorIndex;
-    if (targetLine >= metrics.length) return provider.cursorIndex;
+    if (allLines.isEmpty) return isUp ? 0 : len;
 
-    double targetY = lineCenters[targetLine];
-    final newPosition = textPainter.getPositionForOffset(
-      Offset(_intendedCursorX!, targetY),
-    );
-    return newPosition.offset.clamp(0, len);
-  }
-
-  int _getOffsetIndex(Offset localPosition, EditorProvider provider) {
-    if (_cachedTextPainter == null || _cachedLayout == null) {
-      return provider.cursorIndex;
+    int currentLineIdx = allLines.length - 1;
+    for (int i = 0; i < allLines.length; i++) {
+      if (globalCaretY < allLines[i].y + allLines[i].height - 1.0) {
+        currentLineIdx = i;
+        break;
+      }
     }
-    double logicalY = _cachedLayout!.physicalToLogicalY(localPosition.dy);
-    double logicalX =
-        localPosition.dx -
-        (provider.isPageMode ? _cachedLayout!.marginLeft : 32.0);
-    final position = _cachedTextPainter!.getPositionForOffset(
-      Offset(logicalX, logicalY),
+
+    int targetLineIdx = isUp ? currentLineIdx - 1 : currentLineIdx + 1;
+    if (targetLineIdx < 0) return 0;
+    if (targetLineIdx >= allLines.length) return len;
+
+    var targetLine = allLines[targetLineIdx];
+    final newPosition = targetLine.paragraph.painter.getPositionForOffset(
+      Offset(
+        _intendedCursorX!,
+        targetLine.y - targetLine.paragraph.dy + (targetLine.height / 2),
+      ),
     );
-    return position.offset.clamp(0, provider.engine.getText().length);
+    return (targetLine.paragraph.startOffset + newPosition.offset).clamp(
+      0,
+      len,
+    );
   }
 
   @override
@@ -285,18 +357,18 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
 
         _currentMaxWidth = isPageMode ? 800.0 : constraints.maxWidth;
 
-        if (_cachedTextPainter == null ||
+        if (_cachedParagraphs == null ||
             _cachedPlainText != currentText ||
             _cachedMaxWidth != _currentMaxWidth ||
             _cachedIsPageMode != isPageMode) {
-          _cachedTextPainter = _buildPainter(
+          _cachedParagraphs = _buildPainters(
             provider,
             _currentMaxWidth,
             mLeft,
             mRight,
           );
           _cachedLayout = _computeLayout(
-            _cachedTextPainter!,
+            _cachedParagraphs!,
             provider,
             _currentMaxWidth,
             mLeft,
@@ -310,45 +382,60 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
           _cachedIsPageMode = isPageMode;
         }
 
-        if (_cachedTextPainter != null) {
-          final currentOffset = _cachedTextPainter!.getOffsetForCaret(
-            TextPosition(
-              offset: provider.cursorIndex,
-              affinity: TextAffinity.downstream,
-            ),
-            Rect.zero,
-          );
-
-          final metrics = _cachedTextPainter!.computeLineMetrics();
-          int currentLineIdx = 0;
-          double currentLineCenterY = 0.0;
-          double accY = 0.0;
-
-          for (int i = 0; i < metrics.length; i++) {
-            double h = metrics[i].height;
-            if (currentOffset.dy < accY + h - 1.0) {
-              currentLineIdx = i;
-              currentLineCenterY = accY + (h / 2);
+        if (_cachedParagraphs != null) {
+          PaintedParagraph? currentPara;
+          for (var p in _cachedParagraphs!) {
+            if (provider.cursorIndex >= p.startOffset &&
+                provider.cursorIndex <= p.startOffset + p.length) {
+              currentPara = p;
               break;
             }
-            accY += h;
-            if (i == metrics.length - 1) {
-              currentLineIdx = i;
-              currentLineCenterY = accY - (h / 2);
-            }
           }
+          if (currentPara != null) {
+            int localOffset = provider.cursorIndex - currentPara.startOffset;
+            final currentOffset = currentPara.painter.getOffsetForCaret(
+              TextPosition(
+                offset: localOffset,
+                affinity: TextAffinity.downstream,
+              ),
+              Rect.zero,
+            );
+            final metrics = currentPara.painter.computeLineMetrics();
+            int localLineIdx = 0;
+            double accY = 0.0;
+            double currentLineCenterY = 0.0;
 
-          int startOfLineOffset = _cachedTextPainter!
-              .getPositionForOffset(Offset(0, currentLineCenterY))
-              .offset;
+            for (int i = 0; i < metrics.length; i++) {
+              double h = metrics[i].height;
+              if (currentOffset.dy < accY + h - 1.0) {
+                localLineIdx = i;
+                currentLineCenterY = accY + (h / 2);
+                break;
+              }
+              accY += h;
+              if (i == metrics.length - 1) {
+                localLineIdx = i;
+                currentLineCenterY = accY - (h / 2);
+              }
+            }
+            int startOfLineLocalOffset = currentPara.painter
+                .getPositionForOffset(Offset(0, currentLineCenterY))
+                .offset;
+            int visualCol = math.max(
+              1,
+              localOffset - startOfLineLocalOffset + 1,
+            );
 
-          int visualCol = math.max(
-            1,
-            provider.cursorIndex - startOfLineOffset + 1,
-          );
-          int visualLine = currentLineIdx + 1;
-
-          provider.updateLineAndColumn(visualLine, visualCol);
+            int globalLine = 0;
+            for (var p in _cachedParagraphs!) {
+              if (p == currentPara) {
+                globalLine += localLineIdx + 1;
+                break;
+              }
+              globalLine += p.painter.computeLineMetrics().length;
+            }
+            provider.updateLineAndColumn(globalLine, visualCol);
+          }
         }
 
         double customPaintHeight = _cachedLayout!.physicalHeight;
@@ -497,7 +584,7 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
                           child: CustomPaint(
                             size: Size(_currentMaxWidth, customPaintHeight),
                             painter: EditorPainter(
-                              textPainter: _cachedTextPainter!,
+                              paragraphs: _cachedParagraphs!,
                               layout: _cachedLayout!,
                               plainTextLength: provider.engine.getText().length,
                               cursorIndex: provider.cursorIndex,
