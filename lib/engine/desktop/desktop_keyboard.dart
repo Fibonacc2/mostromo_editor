@@ -7,27 +7,15 @@ import '../../ui/editor/editor_menus.dart';
 class DesktopKeyboardHandler {
   static bool handle(
     KeyEvent event,
-    EditorProvider provider,
-    bool hasFocus, {
+    EditorProvider provider, {
     required VoidCallback onSave,
     required VoidCallback onHideMiniToolbar,
     required VoidCallback onStartBlinking,
     required VoidCallback onClearIntendedX,
     required int Function(bool isUp) onCalculateVerticalMove,
   }) {
-    // 🌟 GÜVENLİK: Uygulama arka planda veya odak dışıysa klavye olaylarını reddet (Alt+Tab hatası için)
-    if (!hasFocus) {
-      return false;
-    }
-
-    // 🌟 OPTİMİZASYON 1: Sadece ilk basımı (KeyDown) ve basılı tutmayı (KeyRepeat) işle.
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
       return false;
-    }
-
-    // 🌟 GÜVENLİK: Tuşun donanım seviyesinde zaten basılı olup olmadığını kontrol et (Çakışma hatası için)
-    if (HardwareKeyboard.instance.isLogicalKeyPressed(event.logicalKey)) {
-      if (event is KeyDownEvent) return true;
     }
 
     onHideMiniToolbar();

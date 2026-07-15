@@ -524,16 +524,18 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
       },
     );
 
-    // 🌟 DÜZELTME: Dışarıdaki gereksiz 'Focus' widget'ını kaldırdık.
-    // Sadece 'KeyboardListener' kullanıyoruz ve odağı tek bir yerde topluyoruz!
-    return KeyboardListener(
+    // 🌟 KESİN ÇÖZÜM: KeyboardListener yerine doğrudan Focus widget'ı kullanıyoruz
+    // ve tuş dinlemeyi doğrudan buraya (onKeyEvent) bağlıyoruz.
+    return Focus(
       focusNode: _focusNode,
       autofocus: true,
-      onKeyEvent: (KeyEvent event) {
-        DesktopKeyboardHandler.handle(
+      onKeyEvent: (FocusNode node, KeyEvent event) {
+        if (widget.isReadingMode) return KeyEventResult.ignored;
+
+        bool handled = DesktopKeyboardHandler.handle(
           event,
           context.read<EditorProvider>(),
-          _focusNode.hasFocus,
+          // hasFocus parametresini buradan sildik
           onSave: () => widget.onSave?.call(),
           onHideMiniToolbar: _hideMiniToolbar,
           onStartBlinking: _startBlinking,
@@ -541,6 +543,8 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
           onCalculateVerticalMove: (isUp) =>
               _calculateVerticalMove(context.read<EditorProvider>(), isUp),
         );
+
+        return handled ? KeyEventResult.handled : KeyEventResult.ignored;
       },
       child: editorContent,
     );
