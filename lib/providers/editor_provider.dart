@@ -591,29 +591,19 @@ class EditorProvider extends ChangeNotifier {
     }
 
     if (hasSelection) {
+      // Eğer metin seçiliyse SADECE seçili kısmı büyüt
       int start = math.min(selectionBase!, cursorIndex);
       int end = math.max(selectionBase!, cursorIndex);
       engine.formatText(start, end - start, isBold: bold, fontSize: size);
+      _syncToolbarWithCursor(); // Toolbar'ı güncel duruma senkronize et
     } else {
-      String text = engine.getText();
-      int start =
-          text.lastIndexOf('\n', cursorIndex > 0 ? cursorIndex - 1 : 0) + 1;
-
-      if (start < 0) {
-        start = 0;
-      }
-
-      int end = text.indexOf('\n', cursorIndex);
-      if (end == -1) {
-        end = text.length;
-      }
-
-      if (end > start) {
-        engine.formatText(start, end - start, isBold: bold, fontSize: size);
-      }
+      // 🌟 KESİN ÇÖZÜM: Tüm satırı seçip dönüştürme mantığı tamamen silindi!
+      // Sadece imlecin o anki stil belleğini güncelliyoruz.
+      // Böylece sen başlığa tıkladıktan SONRA yazacağın şeyler başlık olur, öncekiler etkilenmez.
       _currentFontSize = size;
       _isBold = bold;
     }
+
     setDirty();
     notifyListeners();
   }
@@ -626,6 +616,29 @@ class EditorProvider extends ChangeNotifier {
       _syncToolbarWithCursor();
     } else {
       _currentFontSize = size;
+    }
+    setDirty();
+    notifyListeners();
+  }
+
+  // Hizalamayı tutan getter
+  TextAlign get currentTextAlign {
+    final style = engine.getStyleAt(cursorIndex > 0 ? cursorIndex - 1 : 0);
+    return style.textAlign ?? TextAlign.left;
+  }
+
+  void applyTextAlign(TextAlign alignment) {
+    if (hasSelection) {
+      int start = math.min(selectionBase!, cursorIndex);
+      int end = math.max(selectionBase!, cursorIndex);
+      engine.formatText(start, end - start, textAlign: alignment);
+    } else {
+      String text = engine.getText();
+      int start =
+          text.lastIndexOf('\n', cursorIndex > 0 ? cursorIndex - 1 : 0) + 1;
+      int end = text.indexOf('\n', cursorIndex);
+      if (end == -1) end = text.length;
+      engine.formatText(start, end - start, textAlign: alignment);
     }
     setDirty();
     notifyListeners();

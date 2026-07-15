@@ -14,7 +14,9 @@ class EditorToolbar extends StatelessWidget {
     return Container(
       width: double.infinity,
       decoration: const BoxDecoration(
-        color: Color(0xFF1E1E1E),
+        color: Color(
+          0xFF1E1E1E,
+        ), // Eski temanın rengi korunarak daha koyu bir arka plan
         border: Border(
           bottom: BorderSide(color: MostromoTheme.dividerColor, width: 1),
         ),
@@ -23,66 +25,51 @@ class EditorToolbar extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 1. Kısım: SEKMELER (TABS)
-          _buildTabBar(provider),
+          // 1. Kısım: SEKME BAŞLIKLARI (RIBBON TABS)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.only(left: 8, top: 4),
+            decoration: const BoxDecoration(
+              border: Border(
+                bottom: BorderSide(color: Colors.white10, width: 1),
+              ),
+            ),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  _TabHeader(
+                    title: 'Giriş',
+                    isActive: provider.activeTab == 0,
+                    onTap: () => provider.setActiveTab(0),
+                  ),
+                  _TabHeader(
+                    title: 'Ekle',
+                    isActive: provider.activeTab == 1,
+                    onTap: () => provider.setActiveTab(1),
+                  ),
+                  _TabHeader(
+                    title: 'Düzen',
+                    isActive: provider.activeTab == 2,
+                    onTap: () => provider.setActiveTab(2),
+                  ),
+                ],
+              ),
+            ),
+          ),
 
           // 2. Kısım: SEKME İÇERİĞİ (RIBBON CONTENT)
           Container(
             height: 48,
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 16),
+            color: const Color(0xFF1A1A1A), // İçeriğin hafif farklı tonu
             child: AnimatedSwitcher(
               duration: const Duration(milliseconds: 200),
               child: _buildTabContent(context, provider),
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildTabBar(EditorProvider provider) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: Colors.white10, width: 1)),
-      ),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: [
-            _buildTabButton('Giriş', 0, provider),
-            _buildTabButton('Ekle', 1, provider),
-            _buildTabButton('Düzen', 2, provider),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTabButton(String title, int index, EditorProvider provider) {
-    final isActive = provider.activeTab == index;
-    return GestureDetector(
-      onTap: () => provider.setActiveTab(index),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        decoration: BoxDecoration(
-          border: Border(
-            bottom: BorderSide(
-              color: isActive ? MostromoTheme.accentColor : Colors.transparent,
-              width: 2,
-            ),
-          ),
-        ),
-        child: Text(
-          title,
-          style: TextStyle(
-            color: isActive ? Colors.white : Colors.white54,
-            fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
-            fontSize: 13,
-          ),
-        ),
       ),
     );
   }
@@ -100,7 +87,9 @@ class EditorToolbar extends StatelessWidget {
     }
   }
 
-  // SEKME 1: GİRİŞ
+  // ==========================================
+  // SEKME 1: GİRİŞ (Metin Biçimlendirme)
+  // ==========================================
   Widget _buildHomeTab(BuildContext context, EditorProvider provider) {
     return SizedBox(
       key: const ValueKey('tab_home'),
@@ -108,42 +97,92 @@ class EditorToolbar extends StatelessWidget {
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            _buildStyleDropdown(provider),
-            _buildDivider(),
-
-            // Font Seçici ve Yükleyici Menüsü
             _buildFontFamilyDropdown(context, provider),
-            _buildDivider(),
-
+            const SizedBox(width: 8),
             _buildFontSizeDropdown(provider),
+
             _buildDivider(),
 
-            _buildToolbarIcon(
-              Icons.format_bold,
-              provider.isBold,
-              provider.toggleBold,
+            _ToolbarButton(
+              icon: Icons.format_bold_rounded,
+              tooltip: 'Kalın (Ctrl+B)',
+              isActive: provider.isBold,
+              onPressed: provider.toggleBold,
             ),
-            _buildToolbarIcon(
-              Icons.format_italic,
-              provider.isItalic,
-              provider.toggleItalic,
+            _ToolbarButton(
+              icon: Icons.format_italic_rounded,
+              tooltip: 'İtalik (Ctrl+I)',
+              isActive: provider.isItalic,
+              onPressed: provider.toggleItalic,
             ),
-            _buildToolbarIcon(
-              Icons.format_underlined,
-              provider.isUnderline,
-              provider.toggleUnderline,
+            _ToolbarButton(
+              icon: Icons.format_underline_rounded,
+              tooltip: 'Altı Çizili (Ctrl+U)',
+              isActive: provider.isUnderline,
+              onPressed: provider.toggleUnderline,
             ),
+
             _buildDivider(),
 
-            _buildColorPicker(context, provider),
+            // 🌟 ÇÖZÜLEN KISIM: Başlık aktifse, tekrar basınca '0' (Normal Metin) göndersin.
+            _ToolbarButton(
+              icon: Icons.looks_one_rounded,
+              tooltip: 'Başlık 1',
+              isActive: provider.currentHeadingLevel == 1,
+              onPressed: () => provider.applyHeading(
+                provider.currentHeadingLevel == 1 ? 0 : 1,
+              ),
+            ),
+            _ToolbarButton(
+              icon: Icons.looks_two_rounded,
+              tooltip: 'Başlık 2',
+              isActive: provider.currentHeadingLevel == 2,
+              onPressed: () => provider.applyHeading(
+                provider.currentHeadingLevel == 2 ? 0 : 2,
+              ),
+            ),
+            _ToolbarButton(
+              icon: Icons.looks_3_rounded,
+              tooltip: 'Başlık 3',
+              isActive: provider.currentHeadingLevel == 3,
+              onPressed: () => provider.applyHeading(
+                provider.currentHeadingLevel == 3 ? 0 : 3,
+              ),
+            ),
+
+            _buildDivider(),
+
+            _buildColorPicker(context, provider), // _buildHomeTab içine:
+            _buildDivider(),
+            _ToolbarButton(
+              icon: Icons.format_align_left_rounded,
+              tooltip: 'Sola Yasla',
+              isActive: provider.currentTextAlign == TextAlign.left,
+              onPressed: () => provider.applyTextAlign(TextAlign.left),
+            ),
+            _ToolbarButton(
+              icon: Icons.format_align_center_rounded,
+              tooltip: 'Ortala',
+              isActive: provider.currentTextAlign == TextAlign.center,
+              onPressed: () => provider.applyTextAlign(TextAlign.center),
+            ),
+            _ToolbarButton(
+              icon: Icons.format_align_right_rounded,
+              tooltip: 'Sağa Yasla',
+              isActive: provider.currentTextAlign == TextAlign.right,
+              onPressed: () => provider.applyTextAlign(TextAlign.right),
+            ),
           ],
         ),
       ),
     );
   }
 
-  // SEKME 2: EKLE
+  // ==========================================
+  // SEKME 2: EKLE (Resim, Tablo, Link)
+  // ==========================================
   Widget _buildInsertTab(BuildContext context, EditorProvider provider) {
     return SizedBox(
       key: const ValueKey('tab_insert'),
@@ -151,38 +190,48 @@ class EditorToolbar extends StatelessWidget {
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            _buildActionIcon(Icons.image_outlined, 'Resim Ekle', () {
-              ScaffoldMessenger.of(context).clearSnackBars();
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text(
-                    'Resim motoru, daha serbest bir tasarım için yeniden inşa ediliyor. Şimdilik askıda!',
+            _ToolbarButton(
+              icon: Icons.image_outlined,
+              tooltip: 'Resim Ekle',
+              isActive: false,
+              onPressed: () {
+                ScaffoldMessenger.of(context).clearSnackBars();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Resim motoru yapım aşamasında.'),
                   ),
-                ),
-              );
-            }),
+                );
+              },
+            ),
+            _ToolbarButton(
+              icon: Icons.table_chart_outlined,
+              tooltip: 'Tablo',
+              isActive: false,
+              onPressed: () {
+                ScaffoldMessenger.of(context).clearSnackBars();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Tablo sistemi yakında eklenecek.'),
+                  ),
+                );
+              },
+            ),
 
-            _buildActionIcon(Icons.table_chart_outlined, 'Tablo', () {
-              ScaffoldMessenger.of(context).clearSnackBars();
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Tablo sistemi yakında eklenecek.'),
-                ),
-              );
-            }),
             _buildDivider(),
 
-            _buildActionIcon(
-              Icons.link_rounded,
-              'Bağlantı (Link) Ekle',
-              () => _showLinkDialog(context, provider),
+            _ToolbarButton(
+              icon: Icons.link_rounded,
+              tooltip: 'Bağlantı (Link) Ekle',
               isActive: provider.currentLinkUrl != null,
+              onPressed: () => _showLinkDialog(context, provider),
             ),
-            _buildActionIcon(
-              Icons.horizontal_rule_rounded,
-              'Ayırıcı Çizgi Ekle',
-              () => provider.insertDivider(),
+            _ToolbarButton(
+              icon: Icons.horizontal_rule_rounded,
+              tooltip: 'Ayırıcı Çizgi Ekle',
+              isActive: false,
+              onPressed: () => provider.insertDivider(),
             ),
           ],
         ),
@@ -190,7 +239,9 @@ class EditorToolbar extends StatelessWidget {
     );
   }
 
-  // SEKME 3: DÜZEN
+  // ==========================================
+  // SEKME 3: DÜZEN (Sayfa Yapısı)
+  // ==========================================
   Widget _buildLayoutTab(BuildContext context, EditorProvider provider) {
     return SizedBox(
       key: const ValueKey('tab_layout'),
@@ -198,20 +249,26 @@ class EditorToolbar extends StatelessWidget {
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            _buildActionIcon(
-              provider.isPageMode
+            _ToolbarButton(
+              icon: provider.isPageMode
                   ? Icons.fit_screen_rounded
                   : Icons.fullscreen_rounded,
-              provider.isPageMode ? 'Tam Ekran Modu' : 'Sayfa (A4) Modu',
-              provider.togglePageMode,
+              tooltip: provider.isPageMode
+                  ? 'Tam Ekran Modu'
+                  : 'Sayfa (A4) Modu',
               isActive: provider.isPageMode,
+              onPressed: provider.togglePageMode,
             ),
+
             _buildDivider(),
-            _buildActionIcon(
-              Icons.settings_overscan_rounded,
-              'Sayfa Kenarlıkları',
-              () => _showMarginDialog(context, provider),
+
+            _ToolbarButton(
+              icon: Icons.settings_overscan_rounded,
+              tooltip: 'Sayfa Kenarlıkları',
+              isActive: false,
+              onPressed: () => _showMarginDialog(context, provider),
             ),
           ],
         ),
@@ -221,7 +278,15 @@ class EditorToolbar extends StatelessWidget {
 
   // --- KOMPONENTLER ---
 
-  // 🌟 DÜZELTİLEN KISIM: FONT SEÇİCİ
+  Widget _buildDivider() {
+    return Container(
+      width: 1,
+      height: 20,
+      margin: const EdgeInsets.symmetric(horizontal: 8),
+      color: MostromoTheme.dividerColor,
+    );
+  }
+
   Widget _buildFontFamilyDropdown(
     BuildContext context,
     EditorProvider provider,
@@ -240,9 +305,7 @@ class EditorToolbar extends StatelessWidget {
         }
       },
       itemBuilder: (context) {
-        // 🌟 ÇÖZÜM BURADA: Listeyi açıkça "PopupMenuEntry" olarak tanımlıyoruz ki hem item hem divider alabilsin.
         List<PopupMenuEntry<String>> items = [];
-
         for (String font in provider.loadedFonts) {
           items.add(
             PopupMenuItem<String>(
@@ -258,7 +321,6 @@ class EditorToolbar extends StatelessWidget {
             ),
           );
         }
-
         items.add(const PopupMenuDivider());
         items.add(
           const PopupMenuItem<String>(
@@ -288,7 +350,8 @@ class EditorToolbar extends StatelessWidget {
       },
       child: Container(
         width: 140,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        height: 32,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
         decoration: BoxDecoration(
           color: const Color(0xFF2A2A2A),
           borderRadius: BorderRadius.circular(6),
@@ -308,66 +371,6 @@ class EditorToolbar extends StatelessWidget {
                 ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            const Icon(
-              Icons.arrow_drop_down,
-              color: MostromoTheme.textSecondary,
-              size: 16,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildStyleDropdown(EditorProvider provider) {
-    final Map<int, String> styles = {
-      0: 'Normal Metin',
-      1: 'Başlık 1',
-      2: 'Başlık 2',
-      3: 'Başlık 3',
-    };
-
-    return PopupMenuButton<int>(
-      initialValue: provider.currentHeadingLevel,
-      tooltip: 'Metin Stili',
-      color: const Color(0xFF2A2A2A),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      onSelected: (level) => provider.applyHeading(level),
-      itemBuilder: (context) => styles.entries.map((entry) {
-        return PopupMenuItem<int>(
-          value: entry.key,
-          height: 36,
-          child: Text(
-            entry.value,
-            style: TextStyle(
-              color: Colors.white,
-              fontWeight: entry.key > 0 ? FontWeight.bold : FontWeight.normal,
-              fontSize: entry.key == 1
-                  ? 18
-                  : entry.key == 2
-                  ? 16
-                  : 14,
-            ),
-          ),
-        );
-      }).toList(),
-      child: Container(
-        width: 130,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: const Color(0xFF2A2A2A),
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(
-              styles[provider.currentHeadingLevel]!,
-              style: const TextStyle(
-                color: MostromoTheme.textPrimary,
-                fontSize: 13,
               ),
             ),
             const Icon(
@@ -401,7 +404,8 @@ class EditorToolbar extends StatelessWidget {
           }).toList(),
       child: Container(
         width: 60,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        height: 32,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
         decoration: BoxDecoration(
           color: const Color(0xFF2A2A2A),
           borderRadius: BorderRadius.circular(6),
@@ -427,84 +431,7 @@ class EditorToolbar extends StatelessWidget {
     );
   }
 
-  Widget _buildActionIcon(
-    IconData icon,
-    String tooltip,
-    VoidCallback onTap, {
-    bool isActive = false,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4.0),
-      child: Tooltip(
-        message: tooltip,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(6),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: isActive
-                  ? MostromoTheme.accentColor.withValues(alpha: 0.15)
-                  : Colors.transparent,
-              borderRadius: BorderRadius.circular(6),
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  icon,
-                  color: isActive ? MostromoTheme.accentColor : Colors.white70,
-                  size: 18,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  tooltip,
-                  style: TextStyle(
-                    color: isActive
-                        ? MostromoTheme.accentColor
-                        : Colors.white70,
-                    fontSize: 13,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildToolbarIcon(
-    IconData icon,
-    bool isActive,
-    VoidCallback onPressed,
-  ) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 2.0),
-      child: IconButton(
-        icon: Icon(icon, size: 18),
-        color: isActive
-            ? MostromoTheme.accentColor
-            : MostromoTheme.textSecondary,
-        style: IconButton.styleFrom(
-          backgroundColor: isActive
-              ? MostromoTheme.accentColor.withValues(alpha: 0.15)
-              : Colors.transparent,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-        ),
-        onPressed: onPressed,
-      ),
-    );
-  }
-
-  Widget _buildDivider() {
-    return Container(
-      width: 1,
-      height: 20,
-      margin: const EdgeInsets.symmetric(horizontal: 8),
-      color: MostromoTheme.dividerColor,
-    );
-  }
-
+  // Renk Seçici Butonu (Eski kodundan uyarlandı)
   Widget _buildColorPicker(BuildContext context, EditorProvider provider) {
     return InkWell(
       onTap: () {
@@ -539,29 +466,33 @@ class EditorToolbar extends StatelessWidget {
           ),
         );
       },
-      child: Container(
-        padding: const EdgeInsets.all(4),
-        decoration: BoxDecoration(
-          border: Border.all(color: Colors.white24),
-          borderRadius: BorderRadius.circular(4),
-        ),
-        child: Row(
-          children: [
-            const Icon(
-              Icons.format_color_text,
-              size: 16,
-              color: Colors.white70,
-            ),
-            const SizedBox(width: 4),
-            Container(
-              width: 16,
-              height: 16,
-              decoration: BoxDecoration(
-                color: provider.currentColor ?? Colors.white,
-                shape: BoxShape.circle,
+      child: Tooltip(
+        message: 'Metin Rengi',
+        child: Container(
+          height: 32,
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          decoration: BoxDecoration(
+            color: const Color(0xFF2A2A2A),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Row(
+            children: [
+              const Icon(
+                Icons.format_color_text,
+                size: 16,
+                color: Colors.white70,
               ),
-            ),
-          ],
+              const SizedBox(width: 6),
+              Container(
+                width: 14,
+                height: 14,
+                decoration: BoxDecoration(
+                  color: provider.currentColor ?? Colors.white,
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -739,6 +670,116 @@ class EditorToolbar extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// 🌟 SEKME BAŞLIĞI WIDGET'I (TASARIMI GELİŞTİRİLDİ)
+class _TabHeader extends StatelessWidget {
+  final String title;
+  final bool isActive;
+  final VoidCallback onTap;
+
+  const _TabHeader({
+    required this.title,
+    required this.isActive,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(
+              color: isActive ? MostromoTheme.accentColor : Colors.transparent,
+              width: 2,
+            ),
+          ),
+        ),
+        child: Text(
+          title,
+          style: TextStyle(
+            color: isActive ? Colors.white : Colors.white54,
+            fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+            fontSize: 13,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// 🌟 HOVER EFEKTLİ YENİ BUTON TASARIMI
+class _ToolbarButton extends StatefulWidget {
+  final IconData icon;
+  final String tooltip;
+  final bool isActive;
+  final VoidCallback onPressed;
+
+  const _ToolbarButton({
+    required this.icon,
+    required this.tooltip,
+    required this.isActive,
+    required this.onPressed,
+  });
+
+  @override
+  State<_ToolbarButton> createState() => _ToolbarButtonState();
+}
+
+class _ToolbarButtonState extends State<_ToolbarButton> {
+  bool _isHovering = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: widget.tooltip,
+      waitDuration: const Duration(milliseconds: 400),
+      textStyle: const TextStyle(fontSize: 11, color: Colors.white),
+      decoration: BoxDecoration(
+        color: const Color(0xFF252525),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: MostromoTheme.dividerColor),
+      ),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _isHovering = true),
+        onExit: (_) => setState(() => _isHovering = false),
+        child: GestureDetector(
+          onTap: widget.onPressed,
+          child: Container(
+            height: 32,
+            width: 32,
+            margin: const EdgeInsets.symmetric(horizontal: 2),
+            decoration: BoxDecoration(
+              color: widget.isActive
+                  ? MostromoTheme.accentColor.withValues(alpha: 0.2)
+                  : _isHovering
+                  ? Colors.white.withValues(alpha: 0.08)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(
+                color: widget.isActive
+                    ? MostromoTheme.accentColor.withValues(alpha: 0.5)
+                    : Colors.transparent,
+              ),
+            ),
+            child: Icon(
+              widget.icon,
+              size: 18,
+              color: widget.isActive
+                  ? MostromoTheme.accentColor
+                  : _isHovering
+                  ? Colors.white
+                  : MostromoTheme.textSecondary,
+            ),
+          ),
+        ),
       ),
     );
   }

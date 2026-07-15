@@ -16,6 +16,8 @@ class MostromoStyle {
   double? imageWidth;
   double? imageHeight;
 
+  TextAlign? textAlign; // 🌟 YENİ: Metin hizalaması
+
   MostromoStyle({
     this.isBold = false,
     this.isItalic = false,
@@ -27,6 +29,7 @@ class MostromoStyle {
     this.imageBase64,
     this.imageWidth,
     this.imageHeight,
+    this.textAlign = TextAlign.left, // 🌟 YENİ
   });
 
   MostromoStyle clone() {
@@ -41,6 +44,7 @@ class MostromoStyle {
       imageBase64: imageBase64,
       imageWidth: imageWidth,
       imageHeight: imageHeight,
+      textAlign: textAlign, // 🌟 YENİ
     );
   }
 
@@ -56,6 +60,7 @@ class MostromoStyle {
       'img': imageBase64,
       'iw': imageWidth,
       'ih': imageHeight,
+      'ta': textAlign?.index, // 🌟 YENİ: JSON kısaltması
     };
   }
 
@@ -71,6 +76,9 @@ class MostromoStyle {
       imageBase64: json['img'],
       imageWidth: json['iw']?.toDouble(),
       imageHeight: json['ih']?.toDouble(),
+      textAlign: json['ta'] != null
+          ? TextAlign.values[json['ta']]
+          : TextAlign.left,
     );
   }
 }

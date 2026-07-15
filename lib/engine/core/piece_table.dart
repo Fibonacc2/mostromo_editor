@@ -75,7 +75,6 @@ class PieceTable {
     );
 
     _pieces.insert(insertIndex, newPiece);
-    debugPrint('Inserted "$text" at offset $offset. New pieces: $_pieces');
   }
 
   void delete(int offset, int length) {
@@ -136,6 +135,7 @@ class PieceTable {
     double? fontSize,
     String? fontFamily, // 🌟 YENİ: FONT PARAMETRESİ
     String? linkUrl,
+    TextAlign? textAlign,
     bool clearLink = false,
   }) {
     if (length <= 0) return;
@@ -155,6 +155,7 @@ class PieceTable {
       if (fontSize != null) piece.style!.fontSize = fontSize;
       if (fontFamily != null) piece.style!.fontFamily = fontFamily; // 🌟 YENİ
       if (linkUrl != null) piece.style!.linkUrl = linkUrl;
+      if (textAlign != null) piece.style!.textAlign = textAlign;
       if (clearLink) piece.style!.linkUrl = null;
     }
   }
