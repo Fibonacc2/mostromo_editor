@@ -7,7 +7,7 @@ import 'dart:async';
 import '../../providers/editor_provider.dart';
 import '../core/page_layout.dart';
 import '../core/editor_painter.dart';
-import 'desktop_keyboard.dart'; // 🌟 Yeni ayırdığımız masaüstü klavye yöneticisi
+import 'desktop_keyboard.dart';
 import '../../ui/editor/editor_menus.dart';
 
 class DesktopEditorWidget extends StatefulWidget {
@@ -31,7 +31,6 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
   double _currentMaxWidth = 1000.0;
   Timer? _cursorTimer;
 
-  // 🌟 PERFORMANS 1: setState yerine sadece imleci tetikleyecek ValueNotifier
   final ValueNotifier<bool> _showCursorNotifier = ValueNotifier<bool>(true);
 
   double? _intendedCursorX;
@@ -45,35 +44,20 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
   OverlayEntry? _miniToolbarEntry;
 
   bool _isDraggingSelection = false;
-  Offset? _lastPanGlobalPos; // 🌟 YENİ: Sürüklemenin bittiği son konumu tutacak
+  Offset? _lastPanGlobalPos;
 
   @override
   void initState() {
     super.initState();
-    /*_focusNode = FocusNode(
-      onKeyEvent: (node, event) {
-        if (!mounted || widget.isReadingMode) return KeyEventResult.ignored;
+    _focusNode = FocusNode(debugLabel: 'desktop_editor_focus');
 
-        bool handled = DesktopKeyboardHandler.handle(
-          event,
-          context.read<EditorProvider>(),
-          _focusNode.hasFocus,
-          onSave: () => widget.onSave?.call(),
-          onHideMiniToolbar: _hideMiniToolbar,
-          onStartBlinking: _startBlinking,
-          onClearIntendedX: () => _intendedCursorX = null,
-          onCalculateVerticalMove: (isUp) =>
-              _calculateVerticalMove(context.read<EditorProvider>(), isUp),
-        );
-        return handled ? KeyEventResult.handled : KeyEventResult.ignored;
-      },
-    );*/
-    _focusNode = FocusNode();
+    // 🌟 ODAK GARANTİSİ: Widget ekrana çizildiği an odağı zorla buraya çekiyoruz
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
+      if (mounted && widget.isActive && !widget.isReadingMode) {
         _focusNode.requestFocus();
       }
     });
+
     _focusNode.addListener(() {
       if (_focusNode.hasFocus && !widget.isReadingMode) {
         _startBlinking();
@@ -85,7 +69,6 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
 
     if (widget.isActive && !widget.isReadingMode) {
       _startBlinking();
-      _focusNode.requestFocus();
     }
   }
 
@@ -100,6 +83,10 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
         final provider = context.read<EditorProvider>();
         provider.updateSelection(provider.cursorIndex, null);
       });
+    } else if (widget.isActive &&
+        !oldWidget.isActive &&
+        !widget.isReadingMode) {
+      _focusNode.requestFocus();
     }
   }
 
@@ -108,8 +95,7 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
     _hideMiniToolbar();
     _focusNode.dispose();
     _cursorTimer?.cancel();
-    _showCursorNotifier
-        .dispose(); // 🌟 Bellek sızıntısını önlemek için temizledik
+    _showCursorNotifier.dispose();
     super.dispose();
   }
 
@@ -135,7 +121,6 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
     _showCursorNotifier.value = true;
     _cursorTimer = Timer.periodic(const Duration(milliseconds: 500), (timer) {
       if (mounted && _focusNode.hasFocus) {
-        // 🌟 PERFORMANS 1: Tüm sayfayı setState ile yormadan sadece bu değeri güncelliyoruz
         _showCursorNotifier.value = !_showCursorNotifier.value;
       }
     });
@@ -295,13 +280,11 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
 
     Widget editorContent = LayoutBuilder(
       builder: (context, constraints) {
-        // 🌟 ÇÖZÜM: Eksik olan değişkenler burada LayoutBuilder'ın hemen başında tanımlanıyor
         String currentText = provider.engine.getText();
         bool isPageMode = provider.isPageMode;
 
         _currentMaxWidth = isPageMode ? 800.0 : constraints.maxWidth;
 
-        // 🌟 PERFORMANS 4: Metin veya sayfa yapısı DEĞİŞMEDİYSE baştan hesaplama yapma!
         if (_cachedTextPainter == null ||
             _cachedPlainText != currentText ||
             _cachedMaxWidth != _currentMaxWidth ||
@@ -322,12 +305,11 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
             mBottom,
           );
 
-          // Yeni değerleri önbelleğe kaydet
           _cachedPlainText = currentText;
           _cachedMaxWidth = _currentMaxWidth;
           _cachedIsPageMode = isPageMode;
         }
-        // 🌟 ÇÖZÜM: \n'den bağımsız, ekrandaki GÖRSEL Satır ve Sütunu hesaplama!
+
         if (_cachedTextPainter != null) {
           final currentOffset = _cachedTextPainter!.getOffsetForCaret(
             TextPosition(
@@ -342,7 +324,6 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
           double currentLineCenterY = 0.0;
           double accY = 0.0;
 
-          // İmlecin hangi görsel satıra düştüğünü bul
           for (int i = 0; i < metrics.length; i++) {
             double h = metrics[i].height;
             if (currentOffset.dy < accY + h - 1.0) {
@@ -352,25 +333,21 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
             }
             accY += h;
             if (i == metrics.length - 1) {
-              // Son satır yedeği
               currentLineIdx = i;
               currentLineCenterY = accY - (h / 2);
             }
           }
 
-          // Bulunan görsel satırın, en başındaki offset değerini al
           int startOfLineOffset = _cachedTextPainter!
               .getPositionForOffset(Offset(0, currentLineCenterY))
               .offset;
 
-          // Görsel Sütun = İmlecin Indexi - Satırın Başladığı Index
           int visualCol = math.max(
             1,
             provider.cursorIndex - startOfLineOffset + 1,
           );
           int visualLine = currentLineIdx + 1;
 
-          // Provider'a sonucu ilet
           provider.updateLineAndColumn(visualLine, visualCol);
         }
 
@@ -462,7 +439,6 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
                     onPanUpdate: widget.isReadingMode
                         ? null
                         : (details) {
-                            // 🌟 YENİ: Farenin anlık konumunu sürekli kaydediyoruz
                             _lastPanGlobalPos = details.globalPosition;
 
                             if (!_isDraggingSelection) return;
@@ -489,7 +465,6 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
                         : (details) {
                             _isDraggingSelection = false;
 
-                            // 🌟 YENİ: Sürükleme bittiğinde eğer metin seçilmişse menüyü aç!
                             if (provider.hasSelection &&
                                 _lastPanGlobalPos != null) {
                               _showMiniToolbarWrapper(
@@ -549,19 +524,12 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
       },
     );
 
-    /*return Focus(
-      focusNode: _focusNode,
-      autofocus: true,
-      //autofocus: widget.isActive,
-      child: editorContent,
-    );*/
-    // 🌟 KESİN ÇÖZÜM: Klavye olaylarını sistem düzeyinde yakalayan en güncel yapı
+    // 🌟 DÜZELTME: Dışarıdaki gereksiz 'Focus' widget'ını kaldırdık.
+    // Sadece 'KeyboardListener' kullanıyoruz ve odağı tek bir yerde topluyoruz!
     return KeyboardListener(
       focusNode: _focusNode,
       autofocus: true,
       onKeyEvent: (KeyEvent event) {
-        // DesktopKeyboardHandler zaten KeyEvent alıyor, doğrudan ona gönderiyoruz.
-        // Handler içinde zaten !hasFocus kontrolü var.
         DesktopKeyboardHandler.handle(
           event,
           context.read<EditorProvider>(),

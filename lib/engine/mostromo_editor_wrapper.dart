@@ -32,6 +32,7 @@ class MostromoEditorWrapper extends StatelessWidget {
     } else {
       // 💻 FARE VE FİZİKSEL KLAVYE ODAKLI MOTOR
       return DesktopEditorWidget(
+        key: ValueKey('desktop_editor'),
         onSave: onSave,
         isActive: isActive,
         isReadingMode: isReadingMode,
