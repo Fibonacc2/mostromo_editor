@@ -75,6 +75,7 @@ class PieceTable {
     );
 
     _pieces.insert(insertIndex, newPiece);
+    debugPrint('Inserted "$text" at offset $offset. New pieces: $_pieces');
   }
 
   void delete(int offset, int length) {

@@ -8,8 +8,8 @@ import 'package:file_picker/file_picker.dart';
 import 'dart:math' as math;
 import 'dart:async';
 
-import '../engine/piece_table.dart';
-import '../engine/piece.dart';
+import '../engine/core/piece_table.dart';
+import '../engine/core/piece.dart';
 import '../core/sync_utils.dart';
 
 class EditorProvider extends ChangeNotifier {
@@ -326,9 +326,8 @@ class EditorProvider extends ChangeNotifier {
 
     if (cursorMoved || hasSelection) {
       _syncToolbarWithCursor();
-    } else {
-      notifyListeners();
     }
+    notifyListeners();
   }
 
   void selectWordAt(int index) {
@@ -362,20 +361,18 @@ class EditorProvider extends ChangeNotifier {
     }
   }
 
-  int get currentLine {
-    String text = engine.getText();
-    int safeCursor = cursorIndex.clamp(0, text.length);
-    String textUpToCursor = text.substring(0, safeCursor);
-    return RegExp(r'\n').allMatches(textUpToCursor).length + 1;
-  }
+  // 🌟 YENİ: Görsel satır ve sütunu tutacak değişken
+  String _currentLineAndColumn = "Satır 1, Sütun 1";
+  String get currentLineAndColumn => _currentLineAndColumn;
 
-  int get currentColumn {
-    String text = engine.getText();
-    int safeCursor = cursorIndex.clamp(0, text.length);
-    String textUpToCursor = text.substring(0, safeCursor);
-    int lastNewline = textUpToCursor.lastIndexOf('\n');
-    if (lastNewline == -1) return safeCursor + 1;
-    return safeCursor - lastNewline;
+  // 🌟 YENİ: Arayüzden (TextPainter'dan) gelen kesin koordinatları güncelleyen fonksiyon
+  void updateLineAndColumn(int line, int col) {
+    final newText = "Satır $line, Sütun $col";
+    if (_currentLineAndColumn != newText) {
+      _currentLineAndColumn = newText;
+      // Build döngüsü sırasında çökme yaşamamak için güncellemeyi bir sonraki kareye erteliyoruz
+      Future.microtask(() => notifyListeners());
+    }
   }
 
   int get totalCharacters => engine.getText().length;

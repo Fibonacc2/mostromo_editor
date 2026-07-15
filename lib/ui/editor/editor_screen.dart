@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:mostromo_editor/engine/mostromo_editor_wrapper.dart';
 import 'package:provider/provider.dart';
 import 'dart:convert';
 import 'dart:math' as math;
@@ -6,7 +7,7 @@ import 'dart:math' as math;
 import '../../core/app_theme.dart';
 import '../../models/note.dart';
 import '../../providers/editor_provider.dart';
-import '../../engine/mostromo_editor.dart';
+import '../../engine/mobile/mobile_editor.dart';
 import '../../services/local_storage_service.dart';
 import 'mostromo_status_bar.dart';
 import 'mostromo_title_bar.dart';
@@ -223,7 +224,7 @@ class _EditorScreenState extends State<EditorScreen> {
                       !_isReadingMode, // 🌟 YENİ: Okuma modunda odaklanmayı engelle
                   child: AbsorbPointer(
                     absorbing: _isReadOnly,
-                    child: MostromoEditorWidget(
+                    child: MostromoEditorWrapper(
                       onSave: _saveNoteOnly,
                       isReadingMode:
                           _isReadingMode, // 🌟 YENİ: Editor motoruna durumu bildir

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:ui' as ui;
 import 'dart:math' as math;
-import '../core/app_theme.dart';
+import '../../core/app_theme.dart';
 import 'page_layout.dart';
 
 class EditorPainter extends CustomPainter {

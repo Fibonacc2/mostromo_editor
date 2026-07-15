@@ -1,11 +1,11 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:mostromo_editor/engine/mostromo_editor_wrapper.dart';
 import 'package:provider/provider.dart';
 import '../../core/app_theme.dart';
 import '../../engine/block_engine/mostromo_block.dart';
 import '../../providers/block_editor_provider.dart';
 import '../../providers/editor_provider.dart';
-import '../../engine/mostromo_editor.dart';
 
 class BlockWidget extends StatefulWidget {
   final MostromoBlock block;
@@ -240,7 +240,7 @@ class _BlockWidgetState extends State<BlockWidget> {
     if (_localEditorProvider != null) {
       return ChangeNotifierProvider.value(
         value: _localEditorProvider!,
-        child: MostromoEditorWidget(isActive: isFocused),
+        child: MostromoEditorWrapper(isActive: isFocused),
       );
     } else if (widget.block.type == BlockType.divider) {
       return const Divider(color: Colors.white24, thickness: 1, height: 32);
