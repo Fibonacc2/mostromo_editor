@@ -270,6 +270,15 @@ class EditorToolbar extends StatelessWidget {
               isActive: false,
               onPressed: () => _showMarginDialog(context, provider),
             ),
+            _buildDivider(),
+            _ToolbarButton(
+              icon: Icons.list_alt,
+              isActive: provider.isOutlineVisible,
+              tooltip: 'İçindekiler Panelini Aç/Kapat',
+              onPressed: () {
+                context.read<EditorProvider>().toggleOutlineVisible();
+              },
+            ),
           ],
         ),
       ),

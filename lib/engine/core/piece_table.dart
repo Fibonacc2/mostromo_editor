@@ -5,6 +5,7 @@ class PieceTable {
   final String _originalBuffer;
   String _addBuffer = '';
   List<Piece> _pieces = [];
+  int version = 0;
 
   // --- ZAMAN MAKİNESİ (UNDO / REDO) HAFIZALARI ---
   final List<List<Piece>> _undoStack = [];
@@ -41,6 +42,7 @@ class PieceTable {
     if (_undoStack.isEmpty) return false;
     _redoStack.add(_pieces.map((p) => p.clone()).toList());
     _pieces = _undoStack.removeLast();
+    version++;
     return true;
   }
 
@@ -48,12 +50,14 @@ class PieceTable {
     if (_redoStack.isEmpty) return false;
     _undoStack.add(_pieces.map((p) => p.clone()).toList());
     _pieces = _redoStack.removeLast();
+    version++;
     return true;
   }
 
   void insert(int offset, String text, [MostromoStyle? customStyle]) {
     if (text.isEmpty) return;
     _saveSnapshot();
+    version++;
 
     final int addBufferStart = _addBuffer.length;
     _addBuffer += text;
@@ -80,6 +84,7 @@ class PieceTable {
   void delete(int offset, int length) {
     if (length <= 0) return;
     _saveSnapshot();
+    version++;
 
     List<Piece> newPieces = [];
     int currentOffset = 0;
@@ -133,13 +138,14 @@ class PieceTable {
     bool? isUnderline,
     Color? color,
     double? fontSize,
-    String? fontFamily, // 🌟 YENİ: FONT PARAMETRESİ
+    String? fontFamily,
     String? linkUrl,
     TextAlign? textAlign,
     bool clearLink = false,
   }) {
     if (length <= 0) return;
     _saveSnapshot();
+    version++;
 
     int startIndex = _splitAt(offset);
     int endIndex = _splitAt(offset + length);
@@ -153,7 +159,7 @@ class PieceTable {
       if (isUnderline != null) piece.style!.isUnderline = isUnderline;
       if (color != null) piece.style!.color = color;
       if (fontSize != null) piece.style!.fontSize = fontSize;
-      if (fontFamily != null) piece.style!.fontFamily = fontFamily; // 🌟 YENİ
+      if (fontFamily != null) piece.style!.fontFamily = fontFamily;
       if (linkUrl != null) piece.style!.linkUrl = linkUrl;
       if (textAlign != null) piece.style!.textAlign = textAlign;
       if (clearLink) piece.style!.linkUrl = null;
@@ -231,8 +237,7 @@ class PieceTable {
         TextSpan(
           text: pieceText,
           style: TextStyle(
-            fontFamily:
-                piece.style?.fontFamily, // 🌟 YENİ: SİHİR BURADA ÇALIŞIYOR
+            fontFamily: piece.style?.fontFamily,
             fontWeight: piece.style?.isBold == true
                 ? FontWeight.bold
                 : FontWeight.normal,
@@ -262,8 +267,8 @@ class PieceTable {
     List<TextSpan> currentSpans = [];
     int currentStartOffset = 0;
     int currentLength = 0;
-    TextAlign currentAlign = TextAlign.left;
-    bool isFirstPieceInParagraph = true;
+    int rawLength = 0;
+    TextAlign? pendingAlign;
 
     for (final piece in _pieces) {
       String pieceText = (piece.buffer == BufferType.original)
@@ -271,10 +276,7 @@ class PieceTable {
           : _addBuffer.substring(piece.start, piece.start + piece.length);
 
       final style = piece.style ?? MostromoStyle();
-      if (isFirstPieceInParagraph) {
-        currentAlign = style.textAlign ?? TextAlign.left;
-        isFirstPieceInParagraph = false;
-      }
+      pendingAlign ??= style.textAlign ?? TextAlign.left;
 
       final bool hasImage = style.imageBase64 != null;
       final double letterSpacing = hasImage ? (style.imageWidth ?? 300.0) : 0.0;
@@ -301,47 +303,55 @@ class PieceTable {
       while (true) {
         int nlIndex = pieceText.indexOf('\n', searchIndex);
         if (nlIndex == -1) {
-          // Bu parça içinde başka satır sonu (Enter) yok, kalanını ekle
           String rest = pieceText.substring(searchIndex);
           if (rest.isNotEmpty) {
-            currentSpans.add(TextSpan(text: rest, style: textStyle));
+            String cleanRest = rest.replaceAll('\r', '');
+            if (cleanRest.isNotEmpty) {
+              currentSpans.add(TextSpan(text: cleanRest, style: textStyle));
+              rawLength += cleanRest.length;
+            }
             currentLength += rest.length;
           }
           break;
         } else {
-          // Satır sonu (Enter) bulduk, paragrafı kapat
           String part = pieceText.substring(searchIndex, nlIndex);
           if (part.isNotEmpty) {
-            currentSpans.add(TextSpan(text: part, style: textStyle));
+            String cleanPart = part.replaceAll('\r', '');
+            if (cleanPart.isNotEmpty) {
+              currentSpans.add(TextSpan(text: cleanPart, style: textStyle));
+              rawLength += cleanPart.length;
+            }
             currentLength += part.length;
           }
-          currentLength += 1; // '\n' karakterinin kendisi için
+          currentLength += 1;
 
           blocks.add(
             ParagraphBlock(
               spans: currentSpans,
-              textAlign: currentAlign,
+              textAlign: pendingAlign ?? TextAlign.left,
               startOffset: currentStartOffset,
               length: currentLength,
+              rawTextLength: rawLength,
             ),
           );
 
           currentStartOffset += currentLength;
           currentSpans = [];
           currentLength = 0;
-          currentAlign = style.textAlign ?? TextAlign.left;
+          rawLength = 0;
+          pendingAlign = null;
           searchIndex = nlIndex + 1;
         }
       }
     }
 
-    // Son kalan paragrafı da ekle (Boş olsa bile imleç için gereklidir)
     blocks.add(
       ParagraphBlock(
         spans: currentSpans,
-        textAlign: currentAlign,
+        textAlign: pendingAlign ?? TextAlign.left,
         startOffset: currentStartOffset,
         length: currentLength,
+        rawTextLength: rawLength,
       ),
     );
 
@@ -409,11 +419,13 @@ class ParagraphBlock {
   final TextAlign textAlign;
   final int startOffset;
   final int length;
+  final int rawTextLength;
 
   ParagraphBlock({
     required this.spans,
     required this.textAlign,
     required this.startOffset,
     required this.length,
+    required this.rawTextLength,
   });
 }

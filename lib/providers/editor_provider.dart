@@ -51,6 +51,9 @@ class EditorProvider extends ChangeNotifier {
   String? get currentLinkUrl => _currentLinkUrl;
   String? get currentFontFamily => _currentFontFamily;
 
+  TextAlign _currentTextAlign = TextAlign.left;
+  TextAlign get currentTextAlign => _currentTextAlign;
+
   bool _isDirty = false;
   bool get isDirty => _isDirty;
   bool get hasSelection =>
@@ -291,6 +294,7 @@ class EditorProvider extends ChangeNotifier {
       _currentColor = firstStyle.color;
       _currentLinkUrl = firstStyle.linkUrl;
       _currentFontFamily = firstStyle.fontFamily;
+      _currentTextAlign = firstStyle.textAlign ?? TextAlign.left;
 
       double? firstSize;
       bool isMixed = false;
@@ -316,6 +320,7 @@ class EditorProvider extends ChangeNotifier {
       _currentFontSize = currentStyle.fontSize ?? 16.0;
       _currentLinkUrl = currentStyle.linkUrl;
       _currentFontFamily = currentStyle.fontFamily;
+      _currentTextAlign = currentStyle.textAlign ?? TextAlign.left;
     }
   }
 
@@ -420,6 +425,7 @@ class EditorProvider extends ChangeNotifier {
         fontSize: _currentFontSize,
         linkUrl: _currentLinkUrl,
         fontFamily: _currentFontFamily,
+        textAlign: _currentTextAlign,
       ),
     );
     cursorIndex += text.length;
@@ -621,22 +627,17 @@ class EditorProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Hizalamayı tutan getter
-  TextAlign get currentTextAlign {
-    final style = engine.getStyleAt(cursorIndex > 0 ? cursorIndex - 1 : 0);
-    return style.textAlign ?? TextAlign.left;
-  }
-
   void applyTextAlign(TextAlign alignment) {
+    _currentTextAlign =
+        alignment; // 🌟 Toolbar'ın anında yanması için belleği güncelle
+
     String text = engine.getText();
     if (text.isEmpty) {
-      engine.formatText(0, 0, textAlign: alignment);
       setDirty();
       notifyListeners();
       return;
     }
 
-    // İmlecin veya seçimin başlangıç ve bitiş noktalarını bul
     int baseIndex = hasSelection
         ? math.min(selectionBase!, cursorIndex)
         : cursorIndex;
@@ -644,18 +645,67 @@ class EditorProvider extends ChangeNotifier {
         ? math.max(selectionBase!, cursorIndex)
         : cursorIndex;
 
-    // Bulunan satırın (paragrafın) başını bul
-    int start = text.lastIndexOf('\n', baseIndex > 0 ? baseIndex - 1 : 0) + 1;
-    if (start < 0) start = 0;
+    int start = text.lastIndexOf('\n', baseIndex > 0 ? baseIndex - 1 : 0);
+    start = start == -1 ? 0 : start + 1;
 
-    // Bulunan satırın (paragrafın) sonunu bul
     int end = text.indexOf('\n', extIndex);
-    if (end == -1) end = text.length;
+    if (end != -1) {
+      end +=
+          1; // 🌟 KİLİT ÇÖZÜM: Boş satırın hizalanabilmesi için \n karakterini de formatlamaya dahil et!
+    } else {
+      end = text.length;
+    }
 
-    // Tüm paragraf aralığına hizalamayı bas
-    engine.formatText(start, end - start, textAlign: alignment);
+    int length = end - start;
+    if (length > 0) {
+      engine.formatText(start, length, textAlign: alignment);
+    }
 
     setDirty();
     notifyListeners();
+  }
+
+  // --- DÖKÜMAN SEKMELERİ (OUTLINE) VE SCROLL YÖNETİMİ ---
+  final ScrollController scrollController = ScrollController();
+  bool _isOutlineVisible = false;
+  bool get isOutlineVisible => _isOutlineVisible;
+
+  void toggleOutlineVisible() {
+    _isOutlineVisible = !_isOutlineVisible;
+    notifyListeners();
+  }
+
+  List<Map<String, dynamic>> _currentOutline = [];
+  List<Map<String, dynamic>> get currentOutline => _currentOutline;
+
+  void updateOutline(List<Map<String, dynamic>> outline) {
+    // Sadece gerçekten bir değişiklik varsa UI'ı tetikle (Performans için)
+    bool isChanged = false;
+    if (_currentOutline.length != outline.length) {
+      isChanged = true;
+    } else {
+      for (int i = 0; i < outline.length; i++) {
+        if (_currentOutline[i]['text'] != outline[i]['text'] ||
+            _currentOutline[i]['dy'] != outline[i]['dy']) {
+          isChanged = true;
+          break;
+        }
+      }
+    }
+
+    if (isChanged) {
+      _currentOutline = outline;
+      notifyListeners();
+    }
+  }
+
+  void scrollToHeading(double physicalY) {
+    if (scrollController.hasClients) {
+      scrollController.animateTo(
+        physicalY,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeInOut,
+      );
+    }
   }
 }

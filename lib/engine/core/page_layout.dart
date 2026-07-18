@@ -58,4 +58,22 @@ class PageLayout {
 
     return pageBreaks[pageIndex] + offsetInPrintable;
   }
+
+  // Sayfa modundaki fiziksel kaydırma mesafesini hesaplamak için (YENİ EKLENDİ)
+  double logicalToPhysicalY(double logicalY) {
+    if (!isPageMode) return logicalY;
+
+    int pageIndex = 0;
+    for (int i = 0; i < pageBreaks.length; i++) {
+      if (logicalY >= pageBreaks[i]) {
+        pageIndex = i;
+      } else {
+        break;
+      }
+    }
+
+    double pageTop = pageIndex * (a4Height + pageGap);
+    double offsetInPage = logicalY - pageBreaks[pageIndex];
+    return pageTop + marginTop + offsetInPage;
+  }
 }

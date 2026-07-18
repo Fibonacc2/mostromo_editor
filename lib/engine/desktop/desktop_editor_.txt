@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'dart:math' as math;
 import 'dart:async';
@@ -6,7 +7,6 @@ import 'dart:async';
 import '../../providers/editor_provider.dart';
 import '../core/page_layout.dart';
 import '../core/editor_painter.dart';
-import '../core/custom_layout.dart';
 import 'desktop_keyboard.dart';
 import '../../ui/editor/editor_menus.dart';
 
@@ -26,24 +26,28 @@ class DesktopEditorWidget extends StatefulWidget {
   State<DesktopEditorWidget> createState() => _DesktopEditorWidgetState();
 }
 
+class _LineData {
+  final PaintedParagraph paragraph;
+  final double y;
+  final double height;
+  _LineData(this.paragraph, this.y, this.height);
+}
+
 class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
   late FocusNode _focusNode;
   double _currentMaxWidth = 1000.0;
   Timer? _cursorTimer;
 
   final ValueNotifier<bool> _showCursorNotifier = ValueNotifier<bool>(true);
-  double? _intendedCursorX;
 
-  final CustomTextMeasurer _measurer = CustomTextMeasurer();
-  late LineBreaker _lineBreaker;
-  late DocumentLayouter _layouter;
+  double? _intendedCursorX;
 
   String? _cachedPlainText;
   double? _cachedMaxWidth;
   bool? _cachedIsPageMode;
   int? _cachedVersion;
 
-  List<LogicalLine>? _cachedLines;
+  List<PaintedParagraph>? _cachedParagraphs;
   PageLayout? _cachedLayout;
   OverlayEntry? _miniToolbarEntry;
 
@@ -54,9 +58,6 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
   void initState() {
     super.initState();
     _focusNode = FocusNode(debugLabel: 'desktop_editor_focus');
-
-    _lineBreaker = LineBreaker(_measurer);
-    _layouter = DocumentLayouter(_lineBreaker);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && widget.isActive && !widget.isReadingMode) {
@@ -102,7 +103,6 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
     _focusNode.dispose();
     _cursorTimer?.cancel();
     _showCursorNotifier.dispose();
-    _measurer.clearCache();
     super.dispose();
   }
 
@@ -133,50 +133,91 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
     });
   }
 
-  void _extractOutline(EditorProvider provider) {
-    if (_cachedLines == null || _cachedLayout == null) return;
+  List<PaintedParagraph> _buildPainters(
+    EditorProvider provider,
+    double maxWidth,
+    double mLeft,
+    double mRight,
+  ) {
+    List<PaintedParagraph> paragraphs = [];
+    double printableWidth = provider.isPageMode
+        ? maxWidth - mLeft - mRight
+        : maxWidth - 64;
+    if (printableWidth < 100) printableWidth = 100;
 
-    List<Map<String, dynamic>> outline = [];
-    String fullText = provider.engine.getText();
+    final blocks = provider.engine.getParagraphBlocks();
+    double currentY = 0.0;
 
-    for (var line in _cachedLines!) {
-      if (line.length == 0 || line.words.isEmpty) continue;
+    for (var block in blocks) {
+      final textSpan = TextSpan(
+        children: block.spans.isEmpty
+            ? [
+                TextSpan(
+                  text:
+                      ' ', // 🌟 DÜZELTME: Doğru metrikler için 1 adet gerçek boşluk
+                  style: TextStyle(fontSize: provider.currentFontSize ?? 16.0),
+                ),
+              ]
+            : block.spans,
+        style: const TextStyle(color: Colors.white, fontSize: 16),
+      );
 
-      var style = line.words.first.style;
-      double size = style.fontSize ?? 16.0;
+      final painter = TextPainter(
+        text: textSpan,
+        textDirection: TextDirection.ltr,
+        textAlign: block.textAlign ?? TextAlign.left,
+        strutStyle: StrutStyle(
+          fontSize: provider.currentFontSize ?? 16.0,
+          forceStrutHeight: true,
+        ),
+      )..layout(minWidth: printableWidth, maxWidth: printableWidth);
 
-      // 🌟 DÜZELTME: isBold yerine fontWeight kontrolü yapıyoruz.
-      bool isBold =
-          style.fontWeight == FontWeight.bold ||
-          style.fontWeight == FontWeight.w700;
+      paragraphs.add(
+        PaintedParagraph(
+          painter: painter,
+          startOffset: block.startOffset,
+          length: block.length,
+          rawLength: block.rawTextLength,
+          dy: currentY,
+          height: painter.height,
+        ),
+      );
 
-      if (isBold && size > 18.0) {
-        String text = fullText
-            .substring(line.startOffset, line.startOffset + line.length)
-            .trim();
-        if (text.isNotEmpty) {
-          int level = size >= 24.0 ? 1 : (size >= 20.0 ? 2 : 3);
-
-          if (outline.isNotEmpty &&
-              outline.last['offset'] + outline.last['text'].length >=
-                  line.startOffset) {
-            outline.last['text'] += " $text";
-          } else {
-            outline.add({
-              'text': text,
-              'level': level,
-              'dy': _cachedLayout!.logicalToPhysicalY(line.dy),
-              'offset': line.startOffset,
-            });
-          }
-        }
-      }
+      currentY += painter.height;
     }
-    provider.updateOutline(outline);
+
+    // 🌟 YENİ: KULLANICININ İSTEDİĞİ "HAYALET SATIR" (Ghost Line)
+    final ghostSpan = TextSpan(
+      text: ' ', // Arka planda çizilmesi için 1 boşluk
+      style: TextStyle(fontSize: provider.currentFontSize ?? 16.0),
+    );
+    final ghostPainter = TextPainter(
+      text: ghostSpan,
+      textDirection: TextDirection.ltr,
+      textAlign: TextAlign.left,
+      strutStyle: StrutStyle(
+        fontSize: provider.currentFontSize ?? 16.0,
+        forceStrutHeight: true,
+      ),
+    )..layout(minWidth: printableWidth, maxWidth: printableWidth);
+
+    paragraphs.add(
+      PaintedParagraph(
+        painter: ghostPainter,
+        startOffset: provider.engine.getText().length, // En son indeks
+        length: 0,
+        rawLength: 0,
+        dy: currentY,
+        height: ghostPainter.height,
+        isGhost: true, // 🌟 Hayalet olduğunu işaretliyoruz
+      ),
+    );
+
+    return paragraphs;
   }
 
   int _getOffsetIndex(Offset localPosition, EditorProvider provider) {
-    if (_cachedLines == null || _cachedLayout == null) {
+    if (_cachedParagraphs == null || _cachedLayout == null) {
       return provider.cursorIndex;
     }
 
@@ -185,121 +226,221 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
         localPosition.dx -
         (provider.isPageMode ? _cachedLayout!.marginLeft : 32.0);
 
-    LogicalLine? targetLine;
-    for (var line in _cachedLines!) {
-      if (logicalY >= line.dy && logicalY <= line.dy + line.height) {
-        targetLine = line;
+    PaintedParagraph? targetPara;
+    for (var p in _cachedParagraphs!) {
+      if (logicalY >= p.dy && logicalY <= p.dy + p.height) {
+        targetPara = p;
         break;
       }
     }
 
-    if (targetLine == null) {
+    if (targetPara == null) {
       return logicalY < 0 ? 0 : provider.engine.getText().length;
     }
 
-    final spans = targetLine.words
-        .map((w) => TextSpan(text: w.text, style: w.style))
-        .toList();
-    final painter = TextPainter(
-      text: TextSpan(children: spans),
-      textDirection: TextDirection.ltr,
-    )..layout();
-
-    final position = painter.getPositionForOffset(Offset(logicalX, 0));
-    int localOffset = position.offset;
-
-    // 🌟 DÜZELTME: Linter uyarısı için if bloğu eklendi
-    if (localOffset > targetLine.length) {
-      localOffset = targetLine.length;
+    // 🌟 Hayalet satıra tıklandıysa imleci doğrudan metnin en sonuna gönder!
+    if (targetPara.isGhost) {
+      return provider.engine.getText().length;
     }
 
-    return (targetLine.startOffset + localOffset).clamp(
+    final position = targetPara.painter.getPositionForOffset(
+      Offset(logicalX, logicalY - targetPara.dy),
+    );
+
+    int localOffset = position.offset;
+
+    if (localOffset > targetPara.rawLength) {
+      localOffset = targetPara.rawLength;
+    }
+
+    return (targetPara.startOffset + localOffset).clamp(
       0,
       provider.engine.getText().length,
     );
   }
 
-  int _calculateVerticalMove(EditorProvider provider, bool isUp) {
-    if (_cachedLines == null || _cachedLines!.isEmpty) {
-      return provider.cursorIndex;
+  void _extractOutline(EditorProvider provider) {
+    if (_cachedParagraphs == null || _cachedLayout == null) return;
+
+    List<Map<String, dynamic>> outline = [];
+    String fullText = provider.engine.getText();
+
+    for (var p in _cachedParagraphs!) {
+      if (p.isGhost || p.length == 0) continue;
+
+      var style = provider.engine.getStyleAt(p.startOffset);
+      double size = style.fontSize ?? 16.0;
+
+      // 🌟 BAŞLIK KURALI: Kalın (Bold) VE Font 18'den büyük olmalı
+      if (style.isBold && size > 18.0) {
+        String text = fullText
+            .substring(p.startOffset, p.startOffset + p.length)
+            .trim();
+        if (text.isNotEmpty) {
+          // Font boyutuna göre H1, H2, H3 hiyerarşisi
+          int level = size >= 24.0 ? 1 : (size >= 20.0 ? 2 : 3);
+          outline.add({
+            'text': text,
+            'level': level,
+            'dy': _cachedLayout!.logicalToPhysicalY(
+              p.dy,
+            ), // Kaydırılacak kesin fiziksel Y noktası
+            'offset': p.startOffset,
+          });
+        }
+      }
     }
 
+    provider.updateOutline(outline);
+  }
+
+  PageLayout _computeLayout(
+    List<PaintedParagraph> paragraphs,
+    EditorProvider provider,
+    double maxWidth,
+    double mLeft,
+    double mRight,
+    double mTop,
+    double mBottom,
+  ) {
+    double a4Height = maxWidth * 1.4142;
+    double pageGap = 32.0;
+
+    if (!provider.isPageMode) {
+      double totalH = paragraphs.isNotEmpty
+          ? (paragraphs.last.dy + paragraphs.last.height)
+          : 0;
+      return PageLayout(
+        isPageMode: false,
+        a4Width: maxWidth,
+        a4Height: 0,
+        pageGap: 0,
+        marginTop: 32,
+        marginBottom: 32,
+        marginLeft: 32,
+        marginRight: 32,
+        pageBreaks: [0.0],
+        logicalHeight: totalH + 64,
+      );
+    }
+
+    double printableHeight = a4Height - mTop - mBottom;
+    if (printableHeight < 100) printableHeight = 100;
+
+    List<double> breaks = [0.0];
+    double currentSubHeight = 0.0;
+    double accumulatedY = 0.0;
+
+    for (var p in paragraphs) {
+      final metrics = p.painter.computeLineMetrics();
+      for (var m in metrics) {
+        if (currentSubHeight + m.height > printableHeight &&
+            currentSubHeight > 0) {
+          breaks.add(accumulatedY);
+          currentSubHeight = 0.0;
+        }
+        currentSubHeight += m.height;
+        accumulatedY += m.height;
+      }
+    }
+
+    return PageLayout(
+      isPageMode: true,
+      a4Width: maxWidth,
+      a4Height: a4Height,
+      pageGap: pageGap,
+      marginTop: mTop,
+      marginBottom: mBottom,
+      marginLeft: mLeft,
+      marginRight: mRight,
+      pageBreaks: breaks,
+      logicalHeight: accumulatedY,
+    );
+  }
+
+  int _calculateVerticalMove(EditorProvider provider, bool isUp) {
+    if (_cachedParagraphs == null) return provider.cursorIndex;
     int len = provider.engine.getText().length;
 
-    int currentLineIdx = -1;
-    for (int i = 0; i < _cachedLines!.length; i++) {
-      var line = _cachedLines![i];
-      if (line == _cachedLines!.last) {
-        if (provider.cursorIndex >= line.startOffset &&
-            provider.cursorIndex <= line.startOffset + line.length) {
-          currentLineIdx = i;
+    PaintedParagraph? currentPara;
+    final realLast = _cachedParagraphs!.lastWhere((p) => !p.isGhost);
+
+    for (var p in _cachedParagraphs!) {
+      if (p.isGhost) continue; // Hayalet satırı hesaplamalardan es geç
+
+      if (p == realLast) {
+        if (provider.cursorIndex >= p.startOffset &&
+            provider.cursorIndex <= p.startOffset + p.length) {
+          currentPara = p;
           break;
         }
       } else {
-        if (provider.cursorIndex >= line.startOffset &&
-            provider.cursorIndex < line.startOffset + line.length) {
-          currentLineIdx = i;
+        if (provider.cursorIndex >= p.startOffset &&
+            provider.cursorIndex < p.startOffset + p.length) {
+          currentPara = p;
           break;
         }
       }
     }
 
-    if (currentLineIdx == -1) {
-      return provider.cursorIndex;
+    if (currentPara == null) return provider.cursorIndex;
+
+    int localOffset = provider.cursorIndex - currentPara.startOffset;
+    if (currentPara.rawLength == 0) {
+      localOffset = 0;
+    } else if (localOffset > currentPara.rawLength) {
+      localOffset = currentPara.rawLength;
     }
 
-    LogicalLine currentLine = _cachedLines![currentLineIdx];
-
-    int localOffset = provider.cursorIndex - currentLine.startOffset;
-
-    // 🌟 DÜZELTME: Linter uyarısı için if bloğu eklendi
-    if (localOffset > currentLine.length) {
-      localOffset = currentLine.length;
-    }
-
-    final spans = currentLine.words
-        .map((w) => TextSpan(text: w.text, style: w.style))
-        .toList();
-    final painter = TextPainter(
-      text: TextSpan(children: spans),
-      textDirection: TextDirection.ltr,
-    )..layout();
-    final currentOffset = painter.getOffsetForCaret(
+    final currentOffset = currentPara.painter.getOffsetForCaret(
       TextPosition(offset: localOffset, affinity: TextAffinity.downstream),
       Rect.zero,
     );
 
     _intendedCursorX ??= currentOffset.dx;
+    double globalCaretY = currentPara.dy + currentOffset.dy;
+
+    List<_LineData> allLines = [];
+    for (var p in _cachedParagraphs!) {
+      if (p.isGhost) continue; // Gezinmeye hayaleti katma
+      final metrics = p.painter.computeLineMetrics();
+      double lineY = p.dy;
+      for (var m in metrics) {
+        allLines.add(_LineData(p, lineY, m.height));
+        lineY += m.height;
+      }
+    }
+
+    if (allLines.isEmpty) return isUp ? 0 : len;
+
+    int currentLineIdx = allLines.length - 1;
+    for (int i = 0; i < allLines.length; i++) {
+      if (globalCaretY < allLines[i].y + allLines[i].height - 1.0) {
+        currentLineIdx = i;
+        break;
+      }
+    }
 
     int targetLineIdx = isUp ? currentLineIdx - 1 : currentLineIdx + 1;
+    if (targetLineIdx < 0) return 0;
+    if (targetLineIdx >= allLines.length) return len;
 
-    if (targetLineIdx < 0) {
-      return 0;
-    }
-    if (targetLineIdx >= _cachedLines!.length) {
-      return len;
-    }
-
-    LogicalLine targetLine = _cachedLines![targetLineIdx];
-    final targetSpans = targetLine.words
-        .map((w) => TextSpan(text: w.text, style: w.style))
-        .toList();
-    final targetPainter = TextPainter(
-      text: TextSpan(children: targetSpans),
-      textDirection: TextDirection.ltr,
-    )..layout();
-
-    final newPosition = targetPainter.getPositionForOffset(
-      Offset(_intendedCursorX!, 0),
+    var targetLine = allLines[targetLineIdx];
+    final newPosition = targetLine.paragraph.painter.getPositionForOffset(
+      Offset(
+        _intendedCursorX!,
+        targetLine.y - targetLine.paragraph.dy + (targetLine.height / 2),
+      ),
     );
-    int newLocalOffset = newPosition.offset;
 
-    // 🌟 DÜZELTME: Linter uyarısı için if bloğu eklendi
-    if (newLocalOffset > targetLine.length) {
-      newLocalOffset = targetLine.length;
+    int newLocalOffset = newPosition.offset;
+    if (targetLine.paragraph.rawLength == 0) {
+      newLocalOffset = 0;
+    } else if (newLocalOffset > targetLine.paragraph.rawLength) {
+      newLocalOffset = targetLine.paragraph.rawLength;
     }
 
-    return (targetLine.startOffset + newLocalOffset).clamp(0, len);
+    return (targetLine.paragraph.startOffset + newLocalOffset).clamp(0, len);
   }
 
   @override
@@ -318,88 +459,118 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
 
         _currentMaxWidth = isPageMode ? 800.0 : constraints.maxWidth;
 
-        if (_cachedLines == null ||
+        if (_cachedParagraphs == null ||
             _cachedVersion != provider.engine.version ||
             _cachedPlainText != currentText ||
             _cachedMaxWidth != _currentMaxWidth ||
             _cachedIsPageMode != isPageMode) {
-          double a4Width = _currentMaxWidth;
-          double a4Height = a4Width * 1.4142;
-          double printableWidth = isPageMode
-              ? a4Width - mLeft - mRight
-              : a4Width - 64;
-          if (printableWidth < 100) printableWidth = 100;
-          double printableHeight = isPageMode
-              ? a4Height - mTop - mBottom
-              : double.infinity;
-          if (printableHeight < 100) printableHeight = 100;
-
-          final result = _layouter.layout(
-            fullText: currentText,
-            blocks: provider.engine.getParagraphBlocks(),
-            printableWidth: printableWidth,
-            printableHeight: printableHeight,
-            isPageMode: isPageMode,
+          _cachedParagraphs = _buildPainters(
+            provider,
+            _currentMaxWidth,
+            mLeft,
+            mRight,
           );
-
-          _cachedLines = result.lines;
-
-          _cachedLayout = PageLayout(
-            isPageMode: isPageMode,
-            a4Width: a4Width,
-            a4Height: isPageMode ? a4Height : 0,
-            pageGap: isPageMode ? 32.0 : 0,
-            marginTop: isPageMode ? mTop : 32,
-            marginBottom: isPageMode ? mBottom : 32,
-            marginLeft: isPageMode ? mLeft : 32,
-            marginRight: isPageMode ? mRight : 32,
-            pageBreaks: result.pageBreaks,
-            logicalHeight: isPageMode
-                ? result.totalLogicalHeight
-                : result.totalLogicalHeight + 64,
+          _cachedLayout = _computeLayout(
+            _cachedParagraphs!,
+            provider,
+            _currentMaxWidth,
+            mLeft,
+            mRight,
+            mTop,
+            mBottom,
           );
-
           _cachedVersion = provider.engine.version;
           _cachedPlainText = currentText;
           _cachedMaxWidth = _currentMaxWidth;
           _cachedIsPageMode = isPageMode;
 
+          // 🌟 YENİ EKLENEN KISIM: Render bittiğinde başlıkları tara!
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) _extractOutline(provider);
           });
         }
 
-        if (_cachedLines != null) {
-          int currentLineIdx = -1;
-          for (int i = 0; i < _cachedLines!.length; i++) {
-            var line = _cachedLines![i];
-            if (line == _cachedLines!.last) {
-              if (provider.cursorIndex >= line.startOffset &&
-                  provider.cursorIndex <= line.startOffset + line.length) {
-                currentLineIdx = i;
+        if (_cachedParagraphs != null) {
+          PaintedParagraph? currentPara;
+          final realLast = _cachedParagraphs!.lastWhere((p) => !p.isGhost);
+
+          for (var p in _cachedParagraphs!) {
+            if (p.isGhost) continue;
+
+            if (p == realLast) {
+              if (provider.cursorIndex >= p.startOffset &&
+                  provider.cursorIndex <= p.startOffset + p.length) {
+                currentPara = p;
                 break;
               }
             } else {
-              if (provider.cursorIndex >= line.startOffset &&
-                  provider.cursorIndex < line.startOffset + line.length) {
-                currentLineIdx = i;
+              if (provider.cursorIndex >= p.startOffset &&
+                  provider.cursorIndex < p.startOffset + p.length) {
+                currentPara = p;
                 break;
               }
             }
           }
 
-          if (currentLineIdx != -1) {
-            LogicalLine cl = _cachedLines![currentLineIdx];
-            int localOffset = provider.cursorIndex - cl.startOffset;
-
-            // 🌟 DÜZELTME: Linter uyarısı için if bloğu eklendi
-            if (localOffset > cl.length) {
-              localOffset = cl.length;
+          if (currentPara != null) {
+            int localOffset = provider.cursorIndex - currentPara.startOffset;
+            if (currentPara.rawLength == 0) {
+              localOffset = 0;
+            } else if (localOffset > currentPara.rawLength) {
+              localOffset = currentPara.rawLength;
             }
 
-            int globalLine = currentLineIdx + 1;
-            int visualCol = math.max(1, localOffset + 1);
+            final currentOffset = currentPara.painter.getOffsetForCaret(
+              TextPosition(
+                offset: localOffset,
+                affinity: TextAffinity.downstream,
+              ),
+              Rect.zero,
+            );
 
+            final metrics = currentPara.painter.computeLineMetrics();
+            int localLineIdx = 0;
+            double accY = 0.0;
+            double currentLineCenterY = 0.0;
+
+            for (int i = 0; i < metrics.length; i++) {
+              double h = metrics[i].height;
+              if (currentOffset.dy < accY + h - 1.0) {
+                localLineIdx = i;
+                currentLineCenterY = accY + (h / 2);
+                break;
+              }
+              accY += h;
+              if (i == metrics.length - 1) {
+                localLineIdx = i;
+                currentLineCenterY = accY - (h / 2);
+              }
+            }
+
+            int startOfLineLocalOffset = currentPara.painter
+                .getPositionForOffset(Offset(0, currentLineCenterY))
+                .offset;
+
+            if (currentPara.rawLength == 0) {
+              startOfLineLocalOffset = 0;
+            } else if (startOfLineLocalOffset > currentPara.rawLength) {
+              startOfLineLocalOffset = currentPara.rawLength;
+            }
+
+            int visualCol = math.max(
+              1,
+              localOffset - startOfLineLocalOffset + 1,
+            );
+
+            int globalLine = 0;
+            for (var p in _cachedParagraphs!) {
+              if (p.isGhost) continue; // Hayaleti numara olarak sayma
+              if (p == currentPara) {
+                globalLine += localLineIdx + 1;
+                break;
+              }
+              globalLine += p.painter.computeLineMetrics().length;
+            }
             provider.updateLineAndColumn(globalLine, visualCol);
           }
         }
@@ -494,6 +665,7 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
                         ? null
                         : (details) {
                             _lastPanGlobalPos = details.globalPosition;
+
                             if (!_isDraggingSelection) return;
                             int idx = _getOffsetIndex(
                               details.localPosition,
@@ -517,6 +689,7 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
                         ? null
                         : (details) {
                             _isDraggingSelection = false;
+
                             if (provider.hasSelection &&
                                 _lastPanGlobalPos != null) {
                               _showMiniToolbarWrapper(
@@ -549,7 +722,7 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
                           child: CustomPaint(
                             size: Size(_currentMaxWidth, customPaintHeight),
                             painter: EditorPainter(
-                              lines: _cachedLines!,
+                              paragraphs: _cachedParagraphs!,
                               layout: _cachedLayout!,
                               plainTextLength: provider.engine.getText().length,
                               cursorIndex: provider.cursorIndex,

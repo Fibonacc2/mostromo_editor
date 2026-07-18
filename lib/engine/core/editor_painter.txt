@@ -3,10 +3,29 @@ import 'dart:ui' as ui;
 import 'dart:math' as math;
 import '../../core/app_theme.dart';
 import 'page_layout.dart';
-import 'custom_layout.dart'; // 🌟 YENİ: Yeni motorumuzun modelleri eklendi
+
+class PaintedParagraph {
+  final TextPainter painter;
+  final int startOffset;
+  final int length;
+  final int rawLength;
+  final double dy;
+  final double height;
+  final bool isGhost; // 🌟 YENİ: Sistemin arka planda çizeceği hayalet satır
+
+  PaintedParagraph({
+    required this.painter,
+    required this.startOffset,
+    required this.length,
+    required this.rawLength,
+    required this.dy,
+    required this.height,
+    this.isGhost = false, // 🌟 Varsayılan olarak kapalı
+  });
+}
 
 class EditorPainter extends CustomPainter {
-  final List<LogicalLine> lines; // 🌟 YENİ: Paragraflar yerine Satırlar geldi
+  final List<PaintedParagraph> paragraphs;
   final PageLayout layout;
   final int plainTextLength;
   final int cursorIndex;
@@ -17,7 +36,7 @@ class EditorPainter extends CustomPainter {
   final bool isMobile;
 
   EditorPainter({
-    required this.lines,
+    required this.paragraphs,
     required this.layout,
     required this.plainTextLength,
     required this.cursorIndex,
@@ -31,41 +50,32 @@ class EditorPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     void drawContent(double logicalStart, double logicalEnd) {
-      for (var line in lines) {
-        // CULLING (Optimizasyon): Sadece ekranda (veya mevcut sayfada) görünen satırları çiz
+      for (var p in paragraphs) {
         if (layout.isPageMode &&
-            (line.dy + line.height < logicalStart || line.dy > logicalEnd)) {
+            (p.dy + p.height < logicalStart || p.dy > logicalEnd)) {
           continue;
         }
 
         canvas.save();
-        canvas.translate(0, line.dy); // Kalemi satırın Y eksenine kaydır
-
-        // 🌟 SATIR İÇİN GEÇİCİ PAINTER OLUŞTUR
-        // Koca paragraf yerine sadece 1 satırlık metin için painter oluşturduğumuzdan inanılmaz hızlıdır
-        final List<TextSpan> spans = line.words.map((w) {
-          return TextSpan(text: w.text, style: w.style);
-        }).toList();
-
-        final linePainter = TextPainter(
-          text: TextSpan(children: spans),
-          textDirection: TextDirection.ltr,
-        )..layout();
+        canvas.translate(0, p.dy);
 
         // 1. SEÇİM (SELECTION) ÇİZİMİ
-        if (selectionBase != null && selectionBase != cursorIndex) {
+        if (!p.isGhost &&
+            selectionBase != null &&
+            selectionBase != cursorIndex) {
           int start = math.min(selectionBase!, cursorIndex);
           int end = math.max(selectionBase!, cursorIndex);
 
-          if (end >= line.startOffset &&
-              start <= line.startOffset + line.length) {
-            int localStart = math.max(0, start - line.startOffset);
-            int localEnd = math.min(line.length, end - line.startOffset);
+          if (end >= p.startOffset && start <= p.startOffset + p.length) {
+            int localStart = math.max(0, start - p.startOffset);
+            int localEnd = math.min(p.length, end - p.startOffset);
 
-            final boxes = linePainter.getBoxesForSelection(
+            if (localStart > p.rawLength) localStart = p.rawLength;
+            if (localEnd > p.rawLength) localEnd = p.rawLength;
+
+            final boxes = p.painter.getBoxesForSelection(
               TextSelection(baseOffset: localStart, extentOffset: localEnd),
             );
-
             final selectionPaint = Paint()
               ..color = MostromoTheme.accentColor.withValues(alpha: 0.3);
 
@@ -75,25 +85,66 @@ class EditorPainter extends CustomPainter {
           }
         }
 
-        // 2. SATIRI ÇİZ
-        // Sadece tek bir satır olduğu için karmaşık yükseklik hesaplarına gerek yok
-        linePainter.paint(canvas, Offset.zero);
+        // 2. PARAGRAFIN KENDİSİNİ ÇİZ (Hayalet olsa bile çizilir!)
+        p.painter.paint(canvas, Offset.zero);
 
-        // 3. İMLECİ (CURSOR) ÇİZ
-        if (showCursor &&
+        // 3. RESİMLERİ ÇİZ
+        if (!p.isGhost && imageCache.isNotEmpty) {
+          final paint = Paint()..filterQuality = FilterQuality.high;
+          imageCache.forEach((offsetIndex, uiImage) {
+            if (offsetIndex >= p.startOffset &&
+                offsetIndex < p.startOffset + p.length) {
+              int localOffset = offsetIndex - p.startOffset;
+
+              if (localOffset > p.rawLength) localOffset = p.rawLength;
+
+              final boxes = p.painter.getBoxesForSelection(
+                TextSelection(
+                  baseOffset: localOffset,
+                  extentOffset: localOffset + 1,
+                ),
+              );
+              if (boxes.isNotEmpty) {
+                final rect = boxes.first.toRect();
+                canvas.drawImageRect(
+                  uiImage,
+                  Rect.fromLTWH(
+                    0,
+                    0,
+                    uiImage.width.toDouble(),
+                    uiImage.height.toDouble(),
+                  ),
+                  rect,
+                  paint,
+                );
+              }
+            }
+          });
+        }
+
+        // 4. İMLECİ (CURSOR) ÇİZ
+        if (!p.isGhost &&
+            showCursor &&
             (selectionBase == null || selectionBase == cursorIndex)) {
-          // İmleç bu satırın içinde mi?
-          bool inThisLine = (line == lines.last)
-              ? (cursorIndex >= line.startOffset &&
-                    cursorIndex <= line.startOffset + line.length)
-              : (cursorIndex >= line.startOffset &&
-                    cursorIndex < line.startOffset + line.length);
+          // Gerçek son paragrafı bul (Hayalet olmayanı)
+          final realLast = paragraphs.lastWhere((para) => !para.isGhost);
 
-          if (inThisLine) {
-            int localCursor = cursorIndex - line.startOffset;
+          bool inThisPara = (p == realLast)
+              ? (cursorIndex >= p.startOffset &&
+                    cursorIndex <= p.startOffset + p.length)
+              : (cursorIndex >= p.startOffset &&
+                    cursorIndex < p.startOffset + p.length);
 
-            // Tek satırın içinde imlecin X eksenini bulmak çok güvenlidir
-            final caretOffset = linePainter.getOffsetForCaret(
+          if (inThisPara) {
+            int localCursor = cursorIndex - p.startOffset;
+
+            if (p.rawLength == 0) {
+              localCursor = 0;
+            } else if (localCursor > p.rawLength) {
+              localCursor = p.rawLength;
+            }
+
+            final caretOffset = p.painter.getOffsetForCaret(
               TextPosition(
                 offset: localCursor,
                 affinity: TextAffinity.downstream,
@@ -104,10 +155,20 @@ class EditorPainter extends CustomPainter {
             final cursorPaint = Paint()
               ..color = MostromoTheme.accentColor
               ..strokeWidth = 2.0;
+            double cursorTop = caretOffset.dy;
+            double cursorHeight = currentFontSize * 1.15;
 
-            // Satır yüksekliğini doğrudan LogicalLine'dan alıyoruz!
-            double cursorTop = 0;
-            double cursorHeight = line.height;
+            final metrics = p.painter.computeLineMetrics();
+            double accY = 0.0;
+            for (var m in metrics) {
+              if (caretOffset.dy >= accY - 1.0 &&
+                  caretOffset.dy < accY + m.height) {
+                cursorTop = accY;
+                cursorHeight = m.height;
+                break;
+              }
+              accY += m.height;
+            }
 
             canvas.drawLine(
               Offset(caretOffset.dx, cursorTop),
@@ -121,7 +182,6 @@ class EditorPainter extends CustomPainter {
       }
     }
 
-    // SAYFA ÇİZİM MATEMATİĞİ (Eskisiyle aynı, sadece içerik satır satır çizilecek)
     if (!layout.isPageMode) {
       canvas.drawRect(
         Offset.zero & size,
