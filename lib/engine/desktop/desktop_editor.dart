@@ -145,7 +145,6 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
       var style = line.words.first.style;
       double size = style.fontSize ?? 16.0;
 
-      // 🌟 DÜZELTME: isBold yerine fontWeight kontrolü yapıyoruz.
       bool isBold =
           style.fontWeight == FontWeight.bold ||
           style.fontWeight == FontWeight.w700;
@@ -208,7 +207,6 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
     final position = painter.getPositionForOffset(Offset(logicalX, 0));
     int localOffset = position.offset;
 
-    // 🌟 DÜZELTME: Linter uyarısı için if bloğu eklendi
     if (localOffset > targetLine.length) {
       localOffset = targetLine.length;
     }
@@ -226,21 +224,17 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
 
     int len = provider.engine.getText().length;
 
+    // 🌟 ÇÖZÜM: Hangi satırda olduğumuzu çok daha kesin (gap'siz) bir sınır testiyle buluyoruz
     int currentLineIdx = -1;
     for (int i = 0; i < _cachedLines!.length; i++) {
-      var line = _cachedLines![i];
-      if (line == _cachedLines!.last) {
-        if (provider.cursorIndex >= line.startOffset &&
-            provider.cursorIndex <= line.startOffset + line.length) {
-          currentLineIdx = i;
-          break;
-        }
-      } else {
-        if (provider.cursorIndex >= line.startOffset &&
-            provider.cursorIndex < line.startOffset + line.length) {
-          currentLineIdx = i;
-          break;
-        }
+      int start = _cachedLines![i].startOffset;
+      int end = (i + 1 < _cachedLines!.length)
+          ? _cachedLines![i + 1].startOffset
+          : len + 1;
+
+      if (provider.cursorIndex >= start && provider.cursorIndex < end) {
+        currentLineIdx = i;
+        break;
       }
     }
 
@@ -252,7 +246,6 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
 
     int localOffset = provider.cursorIndex - currentLine.startOffset;
 
-    // 🌟 DÜZELTME: Linter uyarısı için if bloğu eklendi
     if (localOffset > currentLine.length) {
       localOffset = currentLine.length;
     }
@@ -294,7 +287,6 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
     );
     int newLocalOffset = newPosition.offset;
 
-    // 🌟 DÜZELTME: Linter uyarısı için if bloğu eklendi
     if (newLocalOffset > targetLine.length) {
       newLocalOffset = targetLine.length;
     }
@@ -371,20 +363,17 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
 
         if (_cachedLines != null) {
           int currentLineIdx = -1;
+
+          // 🌟 ÇÖZÜM: Satır ve Sütun sayacını da yeni eşleştirme mantığıyla güncelledik.
           for (int i = 0; i < _cachedLines!.length; i++) {
-            var line = _cachedLines![i];
-            if (line == _cachedLines!.last) {
-              if (provider.cursorIndex >= line.startOffset &&
-                  provider.cursorIndex <= line.startOffset + line.length) {
-                currentLineIdx = i;
-                break;
-              }
-            } else {
-              if (provider.cursorIndex >= line.startOffset &&
-                  provider.cursorIndex < line.startOffset + line.length) {
-                currentLineIdx = i;
-                break;
-              }
+            int start = _cachedLines![i].startOffset;
+            int end = (i + 1 < _cachedLines!.length)
+                ? _cachedLines![i + 1].startOffset
+                : currentText.length + 1;
+
+            if (provider.cursorIndex >= start && provider.cursorIndex < end) {
+              currentLineIdx = i;
+              break;
             }
           }
 
@@ -392,7 +381,6 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
             LogicalLine cl = _cachedLines![currentLineIdx];
             int localOffset = provider.cursorIndex - cl.startOffset;
 
-            // 🌟 DÜZELTME: Linter uyarısı için if bloğu eklendi
             if (localOffset > cl.length) {
               localOffset = cl.length;
             }

@@ -1,18 +1,15 @@
-import 'dart:math' as math;
-
-import 'piece_table.dart';
-
 import 'package:flutter/material.dart';
+import 'dart:math' as math;
+import 'piece_table.dart';
 
 // --- 1. VERİ MODELLERİ ---
 
-/// Tek bir kelimeyi, boşluğu veya heceyi temsil eden yapı taşı.
 class WordItem {
   final String text;
   final TextStyle style;
   final double width;
   final double height;
-  final int startIndex; // Kelimenin paragraftaki başlangıç indeksi
+  final int startIndex;
 
   WordItem({
     required this.text,
@@ -23,14 +20,13 @@ class WordItem {
   });
 }
 
-/// Kelimelerin yan yana gelmesiyle oluşan, ekrana çizilecek tek bir satır.
 class LogicalLine {
   final List<WordItem> words;
-  final double width; // Satırın toplam genişliği
-  final double height; // Satırdaki en yüksek kelimenin yüksekliği
-  final double dy; // Sayfa üzerindeki Y koordinatı
-  final int startOffset; // Satırın genel metindeki başlangıç indeksi
-  final int length; // Satırdaki toplam karakter sayısı
+  final double width;
+  final double height;
+  final double dy;
+  final int startOffset;
+  final int length;
 
   LogicalLine({
     required this.words,
@@ -44,53 +40,50 @@ class LogicalLine {
 
 // --- 2. ÖLÇÜM MOTORU (MEASURER) ---
 
-/// Kelimelerin ekranda kaç piksel kapladığını hesaplayan motor.
 class CustomTextMeasurer {
-  // Önbellek: Aynı kelimeyi ve stili defalarca ölçmemek için.
-  // Anahtar: "Kelimemiz_FontSize_FontWeight_vb"
   final Map<String, Size> _measurementCache = {};
 
-  /// Belirli bir metnin boyutlarını hesaplar.
   Size measure(String text, TextStyle style) {
     if (text.isEmpty) return const Size(0, 0);
 
-    // Cache anahtarı oluştur (Performans için kilit nokta)
+    // Satırlar arası mesafeyi daraltmak için yükseklik çarpanını 1.2'ye sabitleme
+    final TextStyle appliedStyle = style.height == null
+        ? style.copyWith(height: 1.2)
+        : style;
+
     final String cacheKey =
-        '${text}_${style.fontSize}_${style.fontWeight}_${style.fontFamily}';
+        '${text}_${appliedStyle.fontSize}_${appliedStyle.fontWeight}_${appliedStyle.fontFamily}_${appliedStyle.height}';
 
     if (_measurementCache.containsKey(cacheKey)) {
       return _measurementCache[cacheKey]!;
     }
 
-    // Eğer cache'de yoksa, TextPainter ile arka planda hızlıca ölç
     final TextPainter painter = TextPainter(
-      text: TextSpan(text: text, style: style),
+      text: TextSpan(text: text, style: appliedStyle),
       textDirection: TextDirection.ltr,
     )..layout();
 
     final Size size = Size(painter.width, painter.height);
-
-    // Hafızaya kaydet
     _measurementCache[cacheKey] = size;
 
     return size;
   }
 
-  /// Cache'i temizlemek için (örneğin devasa bir doküman kapatıldığında)
   void clearCache() {
     _measurementCache.clear();
   }
 }
 
-/// Bir paragrafı alır, kelimeleri ölçer ve sayfa genişliğine göre satırlara (LogicalLine) böler.
+// --- 3. SATIR KIRICI ALGORİTMA (LINE BREAKER) ---
+
 class LineBreaker {
   final CustomTextMeasurer measurer;
 
   LineBreaker(this.measurer);
 
+  // 🌟 GÜNCELLEME: Artık tek bir TextStyle yerine paragrafa ait tüm Zengin Metin Span'lerini alıyor
   List<LogicalLine> breakIntoLines({
-    required String paragraphText,
-    required TextStyle style,
+    required List<TextSpan> spans,
     required double maxWidth,
     required int paragraphStartOffset,
   }) {
@@ -102,83 +95,92 @@ class LineBreaker {
     int currentLength = 0;
     int wordStartOffset = paragraphStartOffset;
 
-    // 🌟 KİLİT NOKTA: Regex ile metni "Kelime grupları" ve "Boşluk grupları" olarak ikiye ayırıyoruz.
-    // Böylece "Merhaba    Dünya" gibi çoklu boşluklar kaybolmaz ve hepsi ölçülür.
-    final matches = RegExp(r'(\s+|\S+)').allMatches(paragraphText);
+    // Eğer paragraf tamamen boşsa (Boş Enter satırı)
+    if (spans.isEmpty ||
+        (spans.length == 1 && (spans.first.text ?? '').isEmpty)) {
+      TextStyle defaultStyle = const TextStyle(
+        fontSize: 16,
+        color: Colors.white,
+        height: 1.2,
+      );
+      if (spans.isNotEmpty && spans.first.style != null) {
+        defaultStyle = spans.first.style!.copyWith(height: 1.2);
+      }
+      final Size size = measurer.measure(' ', defaultStyle);
+      lines.add(
+        LogicalLine(
+          words: [],
+          width: 0.0,
+          height: size.height,
+          dy: 0.0,
+          startOffset: paragraphStartOffset,
+          length: 0,
+        ),
+      );
+      return lines;
+    }
 
-    for (final match in matches) {
-      final String chunk = match.group(0)!;
-      final Size size = measurer.measure(chunk, style);
+    // Paragrafın içindeki tüm zengin metin parçalarını tek tek dön
+    for (var span in spans) {
+      final String spanText = span.text ?? '';
+      if (spanText.isEmpty) continue;
 
-      // EĞER: Bu kelimeyi eklersek sayfa sınırını aşıyorsak VE satırda zaten kelime varsa
-      // (Satırda hiç kelime yoksa ve ilk kelime sayfadan uzunsa, onu zorla eklemek zorundayız)
-      if (currentLineWidth + size.width > maxWidth &&
-          currentLineWords.isNotEmpty) {
-        // 1. Mevcut satırı paketle ve listeye ekle
-        lines.add(
-          LogicalLine(
-            words: List.from(currentLineWords),
-            width: currentLineWidth,
-            height: currentLineHeight == 0
-                ? (style.fontSize ?? 16.0) * 1.15
-                : currentLineHeight,
-            dy: 0.0, // dy değerini (Y koordinatı) tüm belgeyi dizerken belirleyeceğiz
-            startOffset: currentLineWords.first.startIndex,
-            length: currentLength,
+      // Her parçanın kendi özgün stilini koru ve satır aralığını sıkıştır (height: 1.2)
+      final TextStyle spanStyle =
+          (span.style ?? const TextStyle(fontSize: 16, color: Colors.white))
+              .copyWith(height: 1.2);
+
+      final matches = RegExp(r'(\s+|\S+)').allMatches(spanText);
+
+      for (final match in matches) {
+        final String chunk = match.group(0)!;
+        final Size size = measurer.measure(chunk, spanStyle);
+
+        if (currentLineWidth + size.width > maxWidth &&
+            currentLineWords.isNotEmpty) {
+          lines.add(
+            LogicalLine(
+              words: List.from(currentLineWords),
+              width: currentLineWidth,
+              height: currentLineHeight,
+              dy: 0.0,
+              startOffset: currentLineWords.first.startIndex,
+              length: currentLength,
+            ),
+          );
+
+          currentLineWords.clear();
+          currentLineWidth = 0.0;
+          currentLineHeight = 0.0;
+          currentLength = 0;
+        }
+
+        currentLineWords.add(
+          WordItem(
+            text: chunk,
+            style: spanStyle,
+            width: size.width,
+            height: size.height,
+            startIndex: wordStartOffset,
           ),
         );
 
-        // 2. Yeni satır için değerleri sıfırla
-        currentLineWords.clear();
-        currentLineWidth = 0.0;
-        currentLineHeight = 0.0;
-        currentLength = 0;
+        currentLineWidth += size.width;
+        currentLineHeight = math.max(currentLineHeight, size.height);
+        currentLength += chunk.length;
+        wordStartOffset += chunk.length;
       }
-
-      // Kelimeyi veya boşluğu mevcut satıra ekle
-      currentLineWords.add(
-        WordItem(
-          text: chunk,
-          style: style,
-          width: size.width,
-          height: size.height,
-          startIndex: wordStartOffset,
-        ),
-      );
-
-      // Satır değerlerini güncelle
-      currentLineWidth += size.width;
-      currentLineHeight = math.max(currentLineHeight, size.height);
-      currentLength += chunk.length;
-      wordStartOffset += chunk.length;
     }
 
-    // Paragraf bittiğinde, son satırda kalan kelimeler varsa onları da ekle
     if (currentLineWords.isNotEmpty) {
       lines.add(
         LogicalLine(
           words: List.from(currentLineWords),
           width: currentLineWidth,
-          height: currentLineHeight == 0
-              ? (style.fontSize ?? 16.0) * 1.15
-              : currentLineHeight,
+          height: currentLineHeight,
           dy: 0.0,
           startOffset: currentLineWords.first.startIndex,
           length: currentLength,
-        ),
-      );
-    }
-
-    // Paragraf tamamen boşsa (Enter'a basılmış boş bir satır), yükseklik için hayalet satır ekle
-    if (lines.isEmpty) {
-      lines.add(
-        LogicalLine(
-          words: [],
-          width: 0.0,
-          height: (style.fontSize ?? 16.0) * 1.15, // Varsayılan font yüksekliği
-          dy: 0.0,
-          startOffset: paragraphStartOffset,
-          length: 0,
         ),
       );
     }
@@ -187,7 +189,8 @@ class LineBreaker {
   }
 }
 
-/// Dizgi işleminin sonucunu tutan rapor sınıfı
+// --- 4. SAYFA DİZGİCİSİ (DOCUMENT LAYOUTER) ---
+
 class DocumentLayoutResult {
   final List<LogicalLine> lines;
   final double totalLogicalHeight;
@@ -200,7 +203,6 @@ class DocumentLayoutResult {
   });
 }
 
-/// Paragrafları satırlara bölüp 2D uzayda Y koordinatlarına (dy) yerleştiren motor.
 class DocumentLayouter {
   final LineBreaker breaker;
 
@@ -210,8 +212,7 @@ class DocumentLayouter {
     required String fullText,
     required List<ParagraphBlock> blocks,
     required double printableWidth,
-    required double
-    printableHeight, // Sayfa modu için (A4 yüksekliği - marjinler)
+    required double printableHeight,
     required bool isPageMode,
   }) {
     List<LogicalLine> allLines = [];
@@ -220,29 +221,14 @@ class DocumentLayouter {
     double currentSubHeight = 0.0;
 
     for (var block in blocks) {
-      // Bloğun (paragrafın) metnini al
-      String pText = fullText.substring(
-        block.startOffset,
-        block.startOffset + block.length,
-      );
-
-      // Stili belirle (Şimdilik bloğun ilk span'inin stilini baz alıyoruz)
-      TextStyle style = const TextStyle(fontSize: 16, color: Colors.white);
-      if (block.spans.isNotEmpty && block.spans.first.style != null) {
-        style = block.spans.first.style!;
-      }
-
-      // Satır kırıcıyı çağır ve paragrafı serbest satırlara böl
+      // 🌟 DÜZELTME: Tüm zengin metin span'lerini doğrudan kırıcıya gönderiyoruz, sızıntı engellendi!
       List<LogicalLine> pLines = breaker.breakIntoLines(
-        paragraphText: pText,
-        style: style,
+        spans: block.spans,
         maxWidth: printableWidth,
         paragraphStartOffset: block.startOffset,
       );
 
-      // Elde edilen satırlara Y koordinatı (dy) ata ve evrene yerleştir
       for (var line in pLines) {
-        // Sayfa modu açıksa ve bu satır sayfaya sığmıyorsa yeni sayfaya geç (Page Break)
         if (isPageMode &&
             currentSubHeight + line.height > printableHeight &&
             currentSubHeight > 0) {
@@ -250,12 +236,11 @@ class DocumentLayouter {
           currentSubHeight = 0.0;
         }
 
-        // Satırı yeni dy (Y ekseni) değeriyle kopyala ve mühürle
         LogicalLine positionedLine = LogicalLine(
           words: line.words,
           width: line.width,
           height: line.height,
-          dy: currentY, // 🌟 İŞTE BURASI: Satırın dünyadaki gerçek Y konumu
+          dy: currentY,
           startOffset: line.startOffset,
           length: line.length,
         );

@@ -3,10 +3,10 @@ import 'dart:ui' as ui;
 import 'dart:math' as math;
 import '../../core/app_theme.dart';
 import 'page_layout.dart';
-import 'custom_layout.dart'; // 🌟 YENİ: Yeni motorumuzun modelleri eklendi
+import 'custom_layout.dart';
 
 class EditorPainter extends CustomPainter {
-  final List<LogicalLine> lines; // 🌟 YENİ: Paragraflar yerine Satırlar geldi
+  final List<LogicalLine> lines;
   final PageLayout layout;
   final int plainTextLength;
   final int cursorIndex;
@@ -31,18 +31,17 @@ class EditorPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     void drawContent(double logicalStart, double logicalEnd) {
-      for (var line in lines) {
-        // CULLING (Optimizasyon): Sadece ekranda (veya mevcut sayfada) görünen satırları çiz
+      for (int i = 0; i < lines.length; i++) {
+        var line = lines[i];
+
         if (layout.isPageMode &&
             (line.dy + line.height < logicalStart || line.dy > logicalEnd)) {
           continue;
         }
 
         canvas.save();
-        canvas.translate(0, line.dy); // Kalemi satırın Y eksenine kaydır
+        canvas.translate(0, line.dy);
 
-        // 🌟 SATIR İÇİN GEÇİCİ PAINTER OLUŞTUR
-        // Koca paragraf yerine sadece 1 satırlık metin için painter oluşturduğumuzdan inanılmaz hızlıdır
         final List<TextSpan> spans = line.words.map((w) {
           return TextSpan(text: w.text, style: w.style);
         }).toList();
@@ -76,23 +75,26 @@ class EditorPainter extends CustomPainter {
         }
 
         // 2. SATIRI ÇİZ
-        // Sadece tek bir satır olduğu için karmaşık yükseklik hesaplarına gerek yok
         linePainter.paint(canvas, Offset.zero);
 
         // 3. İMLECİ (CURSOR) ÇİZ
         if (showCursor &&
             (selectionBase == null || selectionBase == cursorIndex)) {
-          // İmleç bu satırın içinde mi?
-          bool inThisLine = (line == lines.last)
-              ? (cursorIndex >= line.startOffset &&
-                    cursorIndex <= line.startOffset + line.length)
-              : (cursorIndex >= line.startOffset &&
-                    cursorIndex < line.startOffset + line.length);
+          // 🌟 ÇÖZÜM: İmleç hesabı! Bu satırın sorumluluk alanı, bir sonraki satırın başına kadardır.
+          int nextLineStart = (i + 1 < lines.length)
+              ? lines[i + 1].startOffset
+              : plainTextLength + 1;
+          bool inThisLine =
+              (cursorIndex >= line.startOffset && cursorIndex < nextLineStart);
 
           if (inThisLine) {
             int localCursor = cursorIndex - line.startOffset;
 
-            // Tek satırın içinde imlecin X eksenini bulmak çok güvenlidir
+            // Eğer indeks "\n" gibi görünmez bir karakterdeyse, onu çizilebilecek en son harfe (satır sonuna) kenetle
+            if (localCursor > line.length) {
+              localCursor = line.length;
+            }
+
             final caretOffset = linePainter.getOffsetForCaret(
               TextPosition(
                 offset: localCursor,
@@ -105,9 +107,11 @@ class EditorPainter extends CustomPainter {
               ..color = MostromoTheme.accentColor
               ..strokeWidth = 2.0;
 
-            // Satır yüksekliğini doğrudan LogicalLine'dan alıyoruz!
+            final metrics = linePainter.computeLineMetrics();
+            double cursorHeight = metrics.isNotEmpty
+                ? metrics.first.height
+                : line.height;
             double cursorTop = 0;
-            double cursorHeight = line.height;
 
             canvas.drawLine(
               Offset(caretOffset.dx, cursorTop),
@@ -121,7 +125,6 @@ class EditorPainter extends CustomPainter {
       }
     }
 
-    // SAYFA ÇİZİM MATEMATİĞİ (Eskisiyle aynı, sadece içerik satır satır çizilecek)
     if (!layout.isPageMode) {
       canvas.drawRect(
         Offset.zero & size,
