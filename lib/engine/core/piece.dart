@@ -8,6 +8,7 @@ class MostromoStyle {
   double? fontSize;
   String? linkUrl;
 
+  Color? backgroundColor;
   // 🌟 YENİ: FONT AİLESİ
   String? fontFamily;
 
@@ -25,6 +26,7 @@ class MostromoStyle {
     this.color,
     this.fontSize,
     this.linkUrl,
+    this.backgroundColor,
     this.fontFamily, // 🌟 YENİ
     this.imageBase64,
     this.imageWidth,
@@ -40,6 +42,7 @@ class MostromoStyle {
       color: color,
       fontSize: fontSize,
       linkUrl: linkUrl,
+      backgroundColor: backgroundColor,
       fontFamily: fontFamily, // 🌟 YENİ
       imageBase64: imageBase64,
       imageWidth: imageWidth,
@@ -56,6 +59,7 @@ class MostromoStyle {
       'c': color?.toARGB32(),
       'fs': fontSize,
       'l': linkUrl,
+      'bc': backgroundColor?.toARGB32(),
       'ff': fontFamily, // 🌟 YENİ: JSON kısaltması
       'img': imageBase64,
       'iw': imageWidth,
@@ -72,6 +76,7 @@ class MostromoStyle {
       color: json['c'] != null ? Color(json['c']) : null,
       fontSize: json['fs']?.toDouble(),
       linkUrl: json['l'],
+      backgroundColor: json['bc'] != null ? Color(json['bc']) : null,
       fontFamily: json['ff'], // 🌟 YENİ
       imageBase64: json['img'],
       imageWidth: json['iw']?.toDouble(),

@@ -142,8 +142,102 @@ class EditorPainter extends CustomPainter {
       canvas.translate(dxOffset, line.dy);
 
       final linePainter = line.textPainter;
+      // ============================================================
+      // 🌟 1. ARKA PLAN RENGİ ÇİZİMİ (EN PERFORMANSLI YÖNTEM)
+      // ============================================================
 
-      // SEÇİM ÇİZİMİ
+      // Eğer tüm satır tek bir renge sahipse, tek bir dikdörtgen çiz
+      if (line.backgroundColor != null) {
+        // linePainter'dan tüm metnin bounding box'ını al
+        final allBoxes = linePainter.getBoxesForSelection(
+          TextSelection(baseOffset: 0, extentOffset: line.length),
+        );
+
+        if (allBoxes.isNotEmpty) {
+          Rect fullRect = allBoxes.first.toRect();
+          for (int j = 1; j < allBoxes.length; j++) {
+            fullRect = fullRect.expandToInclude(allBoxes[j].toRect());
+          }
+
+          // Karakterlere yapışmaması için 2px padding
+          fullRect = fullRect.inflate(2);
+
+          final bgPaint = Paint()..color = line.backgroundColor!;
+          canvas.drawRect(fullRect, bgPaint);
+        }
+      } else if (line.words.isNotEmpty) {
+        // Farklı renkler varsa, kelime bazında çiz
+        // Bu durumda arka plan renklerini kelimeler üzerinden çiziyoruz
+        // Ama performans için önce birleştirilebilecek bitişik kelimeleri grupla
+
+        List<List<WordItem>> groups = [];
+        List<WordItem> currentGroup = [];
+        Color? currentColor;
+
+        for (var word in line.words) {
+          if (word.backgroundColor == null) {
+            // Rengi olmayan kelimeleri atla (grupları boş bırak)
+            if (currentGroup.isNotEmpty) {
+              groups.add(currentGroup);
+              currentGroup = [];
+              currentColor = null;
+            }
+            continue;
+          }
+
+          if (currentColor == null) {
+            currentColor = word.backgroundColor;
+            currentGroup.add(word);
+          } else if (currentColor == word.backgroundColor) {
+            currentGroup.add(word);
+          } else {
+            // Renk değişti, önceki grubu kaydet
+            if (currentGroup.isNotEmpty) {
+              groups.add(currentGroup);
+            }
+            currentGroup = [word];
+            currentColor = word.backgroundColor;
+          }
+        }
+
+        if (currentGroup.isNotEmpty) {
+          groups.add(currentGroup);
+        }
+
+        // Her grup için tek bir dikdörtgen çiz
+        double xOffset = 0;
+        for (var group in groups) {
+          // Grubun başlangıç ve bitiş pozisyonunu bul
+          double startX = 0;
+          double endX = 0;
+          Color groupColor = group.first.backgroundColor!;
+
+          // Kelimelerin toplam genişliğini hesapla
+          double totalWidth = 0;
+          for (var word in group) {
+            totalWidth += word.width;
+          }
+
+          // Grubun başlangıç pozisyonunu bul
+          for (var word in line.words) {
+            if (word == group.first) break;
+            startX += word.width;
+          }
+          endX = startX + totalWidth;
+
+          Rect groupRect = Rect.fromLTWH(
+            startX,
+            0,
+            endX - startX,
+            line.height,
+          ).inflate(1);
+
+          final bgPaint = Paint()..color = groupColor;
+          canvas.drawRect(groupRect, bgPaint);
+        }
+      }
+
+      // 2. SEÇİM ÇİZİMİ
       if (selectionBase != null && selectionBase != cursorIndex) {
         int start = math.min(selectionBase!, cursorIndex);
         int end = math.max(selectionBase!, cursorIndex);

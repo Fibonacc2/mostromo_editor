@@ -137,11 +137,13 @@ class PieceTable {
     bool? isItalic,
     bool? isUnderline,
     Color? color,
+    Color? backgroundColor,
     double? fontSize,
     String? fontFamily,
     String? linkUrl,
     TextAlign? textAlign,
     bool clearLink = false,
+    bool clearBackground = false,
   }) {
     if (length <= 0) return;
     _saveSnapshot();
@@ -158,11 +160,15 @@ class PieceTable {
       if (isItalic != null) piece.style!.isItalic = isItalic;
       if (isUnderline != null) piece.style!.isUnderline = isUnderline;
       if (color != null) piece.style!.color = color;
+      if (backgroundColor != null)
+        piece.style!.backgroundColor = backgroundColor; // 🌟 YENİ
       if (fontSize != null) piece.style!.fontSize = fontSize;
       if (fontFamily != null) piece.style!.fontFamily = fontFamily;
       if (linkUrl != null) piece.style!.linkUrl = linkUrl;
       if (textAlign != null) piece.style!.textAlign = textAlign;
+
       if (clearLink) piece.style!.linkUrl = null;
+      if (clearBackground) piece.style!.backgroundColor = null;
     }
   }
 
@@ -255,6 +261,7 @@ class PieceTable {
                       : (piece.style?.color ?? Colors.white)),
             fontSize: fontSize,
             letterSpacing: letterSpacing,
+            backgroundColor: piece.style?.backgroundColor,
           ),
         ),
       );
@@ -297,6 +304,7 @@ class PieceTable {
             : (hasLink ? Colors.blueAccent : (style.color ?? Colors.white)),
         fontSize: fontSize,
         letterSpacing: letterSpacing,
+        backgroundColor: style.backgroundColor,
       );
 
       int searchIndex = 0;

@@ -335,6 +335,7 @@ class EditorProvider extends ChangeNotifier {
       _currentLinkUrl = firstStyle.linkUrl;
       _currentFontFamily = firstStyle.fontFamily;
       _currentTextAlign = firstStyle.textAlign ?? TextAlign.left;
+      _currentBackgroundColor = firstStyle.backgroundColor;
 
       double? firstSize;
       bool isMixed = false;
@@ -380,6 +381,7 @@ class EditorProvider extends ChangeNotifier {
       _currentLinkUrl = currentStyle.linkUrl;
       _currentFontFamily = currentStyle.fontFamily;
       _currentTextAlign = currentStyle.textAlign ?? TextAlign.left;
+      _currentBackgroundColor = currentStyle.backgroundColor;
     }
   }
 
@@ -487,6 +489,7 @@ class EditorProvider extends ChangeNotifier {
         linkUrl: _currentLinkUrl,
         fontFamily: _currentFontFamily,
         textAlign: _currentTextAlign,
+        backgroundColor: _currentBackgroundColor,
       ),
     );
     cursorIndex += text.length;
@@ -561,6 +564,8 @@ class EditorProvider extends ChangeNotifier {
     Color? color,
     double? fontSize,
     String? fontFamily,
+    Color? backgroundColor,
+    bool? clearBackground,
   }) {
     if (!hasSelection) {
       return;
@@ -576,6 +581,9 @@ class EditorProvider extends ChangeNotifier {
       color: color,
       fontSize: fontSize,
       fontFamily: fontFamily,
+      backgroundColor: backgroundColor,
+
+      clearBackground: clearBackground ?? false,
     );
     setDirty();
   }
@@ -999,5 +1007,27 @@ class EditorProvider extends ChangeNotifier {
 
     // Aramayı yeniden yap (yeni metinle)
     findText(_currentSearchQuery);
+  }
+
+  /////// BACKGROUND COLOR
+  ///
+  Color? _currentBackgroundColor;
+  Color? get currentBackgroundColor => _currentBackgroundColor;
+
+  void setHighlightColor(Color? color) {
+    _currentBackgroundColor = color;
+    if (hasSelection) {
+      int start = math.min(selectionBase!, cursorIndex);
+      int end = math.max(selectionBase!, cursorIndex);
+      engine.formatText(
+        start,
+        end - start,
+        backgroundColor: color,
+        clearBackground: color == null,
+      );
+      _syncToolbarWithCursor();
+    }
+    setDirty();
+    notifyListeners();
   }
 }

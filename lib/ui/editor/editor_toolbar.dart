@@ -154,7 +154,10 @@ class EditorToolbar extends StatelessWidget {
 
             _buildDivider(),
 
-            _buildColorPicker(context, provider), // _buildHomeTab içine:
+            _buildColorPicker(context, provider),
+            const SizedBox(width: 8), // Boşluk
+            _buildHighlightPicker(context, provider), // 🌟 YENİ EKLENDİ
+            _buildDivider(), // _buildHomeTab içine:
             _buildDivider(),
             _ToolbarButton(
               icon: Icons.format_align_left_rounded,
@@ -677,6 +680,79 @@ class EditorToolbar extends StatelessWidget {
                   color: provider.currentColor ?? Colors.white,
                   shape: BoxShape.circle,
                 ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  } // 🌟 YENİ: Fosforlu Kalem Seçici
+
+  Widget _buildHighlightPicker(BuildContext context, EditorProvider provider) {
+    return InkWell(
+      onTap: () {
+        Color pickerColor = provider.currentBackgroundColor ?? Colors.yellow;
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            backgroundColor: MostromoTheme.surfaceColor,
+            title: const Text(
+              'Arka Plan Rengi',
+              style: TextStyle(color: Colors.white),
+            ),
+            content: SingleChildScrollView(
+              child: BlockPicker(
+                pickerColor: pickerColor,
+                onColorChanged: (color) => pickerColor = color,
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  provider.setHighlightColor(null); // Fosforu temizle
+                  Navigator.pop(context);
+                },
+                child: const Text(
+                  'Rengi Temizle',
+                  style: TextStyle(color: Colors.redAccent),
+                ),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('İptal'),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  provider.setHighlightColor(pickerColor);
+                  Navigator.pop(context);
+                },
+                child: const Text('Uygula'),
+              ),
+            ],
+          ),
+        );
+      },
+      child: Tooltip(
+        message: 'Metin Vurgu Rengi',
+        child: Container(
+          height: 32,
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          decoration: BoxDecoration(
+            color: provider.currentBackgroundColor != null
+                ? provider.currentBackgroundColor!.withValues(alpha: 0.2)
+                : const Color(0xFF2A2A2A),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(
+              color: provider.currentBackgroundColor ?? Colors.transparent,
+              width: 1,
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                Icons.border_color, // Fosforlu kalem ikonu
+                size: 16,
+                color: provider.currentBackgroundColor ?? Colors.white70,
               ),
             ],
           ),

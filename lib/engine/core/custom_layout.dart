@@ -10,6 +10,7 @@ class WordItem {
   final double width;
   final double height;
   final int startIndex;
+  final Color? backgroundColor; // 🌟 ARKA PLAN RENGİ
 
   WordItem({
     required this.text,
@@ -17,6 +18,7 @@ class WordItem {
     required this.width,
     required this.height,
     required this.startIndex,
+    this.backgroundColor, // 🌟 YENİ
   });
 }
 
@@ -33,6 +35,9 @@ class LogicalLine {
   // 🌟 YENİ: Çizim Motoru Cache'i
   final TextPainter textPainter;
 
+  // 🌟 YENİ: Tüm satırın arka plan rengi (tek renkse)
+  final Color? backgroundColor;
+
   LogicalLine({
     required this.words,
     required this.width,
@@ -43,6 +48,7 @@ class LogicalLine {
     required this.textAlign,
     required this.layoutWidth,
     required this.textPainter,
+    this.backgroundColor, // 🌟 YENİ
   });
 }
 
@@ -62,7 +68,7 @@ class CustomTextMeasurer {
     }
 
     final String cacheKey =
-        '${text}_${appliedStyle.fontSize}_${appliedStyle.fontWeight}_${appliedStyle.fontFamily}_${appliedStyle.height}';
+        '${text}_${appliedStyle.fontSize}_${appliedStyle.fontWeight}_${appliedStyle.fontFamily}_${appliedStyle.height}_${appliedStyle.backgroundColor?.toARGB32()}';
 
     if (_measurementCache.containsKey(cacheKey)) {
       return _measurementCache[cacheKey]!;
@@ -110,6 +116,24 @@ class LineBreaker {
     return painter;
   }
 
+  /// Bir satırdaki tüm kelimelerin arka plan rengini kontrol eder.
+  /// Eğer tüm kelimeler aynı renge sahipse o rengi döndürür, değilse null döndürür.
+  Color? _determineLineBackgroundColor(List<WordItem> words) {
+    if (words.isEmpty) return null;
+
+    Color? firstBg = words.first.backgroundColor;
+    bool allSame = true;
+
+    for (var word in words) {
+      if (word.backgroundColor != firstBg) {
+        allSame = false;
+        break;
+      }
+    }
+
+    return allSame ? firstBg : null;
+  }
+
   List<LogicalLine> breakIntoLines({
     required List<TextSpan> spans,
     required double maxWidth,
@@ -147,7 +171,8 @@ class LineBreaker {
           length: 0,
           textAlign: textAlign,
           layoutWidth: maxWidth,
-          textPainter: emptyPainter, // 🌟 CACHE EKLENDİ
+          textPainter: emptyPainter,
+          backgroundColor: null,
         ),
       );
       return lines;
@@ -191,7 +216,8 @@ class LineBreaker {
               length: currentLength,
               textAlign: textAlign,
               layoutWidth: maxWidth,
-              textPainter: painter, // 🌟 CACHE EKLENDİ
+              textPainter: painter,
+              backgroundColor: _determineLineBackgroundColor(currentLineWords),
             ),
           );
 
@@ -208,6 +234,7 @@ class LineBreaker {
             width: size.width,
             height: size.height,
             startIndex: wordStartOffset,
+            backgroundColor: spanStyle.backgroundColor, // 🌟 YENİ
           ),
         );
 
@@ -231,7 +258,8 @@ class LineBreaker {
           length: currentLength,
           textAlign: textAlign,
           layoutWidth: maxWidth,
-          textPainter: painter, // 🌟 CACHE EKLENDİ
+          textPainter: painter,
+          backgroundColor: _determineLineBackgroundColor(currentLineWords),
         ),
       );
     }
@@ -239,6 +267,7 @@ class LineBreaker {
     return lines;
   }
 }
+
 // --- 4. SAYFA DİZGİCİSİ (DOCUMENT LAYOUTER) ---
 
 class DocumentLayoutResult {
@@ -265,9 +294,9 @@ class DocumentLayouter {
     required double printableWidth,
     required double printableHeight,
     required bool isPageMode,
-    double a4Height = 0.0, // 🌟 YENİ
-    double marginTop = 0.0, // 🌟 YENİ
-    double pageGap = 0.0, // 🌟 YENİ
+    double a4Height = 0.0,
+    double marginTop = 0.0,
+    double pageGap = 0.0,
   }) {
     List<LogicalLine> allLines = [];
     int currentPage = 0;
@@ -281,7 +310,7 @@ class DocumentLayouter {
       );
       for (var span in block.spans) {
         sigBuilder.write(
-          '${span.text}_${span.style?.fontWeight}_${span.style?.fontSize}_${span.style?.fontStyle}_${span.style?.decoration}_',
+          '${span.text}_${span.style?.fontWeight}_${span.style?.fontSize}_${span.style?.fontStyle}_${span.style?.decoration}_${span.style?.color?.toARGB32()}_${span.style?.backgroundColor?.toARGB32()}_',
         );
       }
       String signature = sigBuilder.toString();
@@ -302,7 +331,7 @@ class DocumentLayouter {
       for (var template in templateLines) {
         double finalDy = 0.0;
 
-        // 🌟 KİLİT ÇÖZÜM: Mutlak (Absolute) Y Koordinatı Ataması
+        // Mutlak (Absolute) Y Koordinatı Ataması
         if (isPageMode) {
           // Sayfa sınırını aştıysak yeni sayfaya zıpla
           if (currentSubY + template.height > printableHeight &&
@@ -324,12 +353,13 @@ class DocumentLayouter {
           words: template.words,
           width: template.width,
           height: template.height,
-          dy: finalDy, // 🌟 Artık satırlar sayfada nerede duracaklarını kesin olarak biliyor!
+          dy: finalDy,
           startOffset: block.startOffset + template.startOffset,
           length: template.length,
           textAlign: template.textAlign,
           layoutWidth: template.layoutWidth,
           textPainter: template.textPainter,
+          backgroundColor: template.backgroundColor,
         );
 
         allLines.add(positionedLine);
