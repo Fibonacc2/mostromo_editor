@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:file_picker/file_picker.dart';
+import 'package:mostromo_editor/engine/core/custom_layout.dart';
 import 'dart:math' as math;
 import 'dart:async';
 
@@ -796,6 +797,95 @@ class EditorProvider extends ChangeNotifier {
   int get currentSearchMatchIndex => _currentSearchMatchIndex;
   String get currentSearchQuery => _currentSearchQuery;
 
+  // YENİ: Cached Lines
+  List<LogicalLine>? _cachedLines;
+
+  // YENİ: Setter metodu
+  void setCachedLines(List<LogicalLine> lines) {
+    _cachedLines = lines;
+  }
+
+  void _jumpToMatch(int matchPos) {
+    // Seçimi güncelle (vurgu için)
+    updateSelection(matchPos + _currentSearchQuery.length, matchPos);
+
+    if (!scrollController.hasClients) return;
+
+    // 1. Önce cachedLines varsa onu kullan
+    if (_cachedLines != null && _cachedLines!.isNotEmpty) {
+      LogicalLine? targetLine;
+      for (var line in _cachedLines!) {
+        int start = line.startOffset;
+        int end = start + line.length;
+        // Eşleşme bu satırın aralığında mı?
+        if (matchPos >= start && matchPos <= end) {
+          targetLine = line;
+          break;
+        }
+      }
+
+      // Eğer bulunamazsa (nadir), son satıra git
+      targetLine ??= _cachedLines!.last;
+
+      double targetY = targetLine.dy;
+      // Sayfa modunda da targetY zaten fiziksel Y, ekstra işlem yok
+      scrollController.animateTo(
+        targetY.clamp(0.0, scrollController.position.maxScrollExtent),
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeInOut,
+      );
+      return;
+    }
+
+    // 2. Fallback: cachedLines yoksa eski mantık (ama bu artık çalışmaz, koruma amaçlı)
+    final blocks = engine.getParagraphBlocks();
+    double targetDy = 0.0;
+    bool found = false;
+    for (var block in blocks) {
+      if (matchPos >= block.startOffset &&
+          matchPos <= block.startOffset + block.length) {
+        found = true;
+        break;
+      }
+      targetDy += (block.spans.isEmpty
+          ? 20.0
+          : 24.0 * math.max(1, block.spans.length));
+    }
+    if (found || targetDy > 0) {
+      scrollController.animateTo(
+        targetDy.clamp(0.0, scrollController.position.maxScrollExtent),
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeInOut,
+      );
+    }
+  }
+
+  // 🌟 YENİ: Arama ayarları
+  bool _isCaseSensitive = false;
+  bool _isWholeWord = false;
+
+  // Getter'lar
+  bool get isCaseSensitive => _isCaseSensitive;
+  bool get isWholeWord => _isWholeWord;
+
+  // 🌟 YENİ: Toggle metotları (Aramayı otomatik yeniler)
+  void toggleCaseSensitive() {
+    _isCaseSensitive = !_isCaseSensitive;
+    if (_currentSearchQuery.isNotEmpty) {
+      findText(_currentSearchQuery); // Yeniden ara
+    }
+    notifyListeners();
+  }
+
+  void toggleWholeWord() {
+    _isWholeWord = !_isWholeWord;
+    if (_currentSearchQuery.isNotEmpty) {
+      findText(_currentSearchQuery); // Yeniden ara
+    }
+    notifyListeners();
+  }
+
+  // 🌟 GÜNCELLENDİ: findText metodu (Case Sensitive ve Whole Word desteği)
   void findText(String query, {bool caseSensitive = false}) {
     _searchMatches.clear();
     _currentSearchMatchIndex = -1;
@@ -807,22 +897,38 @@ class EditorProvider extends ChangeNotifier {
     }
 
     String text = engine.getText();
-    String targetText = caseSensitive ? text : text.toLowerCase();
-    String searchQuery = caseSensitive ? query : query.toLowerCase();
+    bool useCase = _isCaseSensitive; // Ayarlardan al
+    bool wholeWord = _isWholeWord;
 
-    int startIndex = 0;
-    while (true) {
-      int matchIndex = targetText.indexOf(searchQuery, startIndex);
-      if (matchIndex == -1) break;
-
-      _searchMatches.add(matchIndex);
-      startIndex = matchIndex + searchQuery.length;
+    if (wholeWord) {
+      // ✅ Tam kelime eşleşmesi (Regex ile)
+      String pattern = r'\b' + RegExp.escape(query) + r'\b';
+      RegExp regExp = RegExp(pattern, caseSensitive: useCase);
+      int start = 0;
+      while (true) {
+        Match? match = regExp.firstMatch(text.substring(start));
+        if (match == null) break;
+        int index = start + match.start;
+        _searchMatches.add(index);
+        start = index + match.end - match.start;
+        if (start >= text.length) break;
+      }
+    } else {
+      // ✅ Normal eşleşme (indexOf ile)
+      String targetText = useCase ? text : text.toLowerCase();
+      String searchQuery = useCase ? query : query.toLowerCase();
+      int startIndex = 0;
+      while (true) {
+        int matchIndex = targetText.indexOf(searchQuery, startIndex);
+        if (matchIndex == -1) break;
+        _searchMatches.add(matchIndex);
+        startIndex = matchIndex + searchQuery.length;
+      }
     }
 
     if (_searchMatches.isNotEmpty) {
       _currentSearchMatchIndex = 0;
-      // Bulunan ilk eşleşmeye imleci götür ve seçili hale getir
-      updateSelection(_searchMatches[0] + query.length, _searchMatches[0]);
+      _jumpToMatch(_searchMatches[0]);
     }
     notifyListeners();
   }
@@ -832,7 +938,7 @@ class EditorProvider extends ChangeNotifier {
     _currentSearchMatchIndex =
         (_currentSearchMatchIndex + 1) % _searchMatches.length;
     int matchPos = _searchMatches[_currentSearchMatchIndex];
-    updateSelection(matchPos + _currentSearchQuery.length, matchPos);
+    _jumpToMatch(matchPos);
   }
 
   void findPrevious() {
@@ -841,7 +947,7 @@ class EditorProvider extends ChangeNotifier {
         (_currentSearchMatchIndex - 1 + _searchMatches.length) %
         _searchMatches.length;
     int matchPos = _searchMatches[_currentSearchMatchIndex];
-    updateSelection(matchPos + _currentSearchQuery.length, matchPos);
+    _jumpToMatch(matchPos);
   }
 
   void clearSearch() {
@@ -849,5 +955,49 @@ class EditorProvider extends ChangeNotifier {
     _currentSearchMatchIndex = -1;
     _currentSearchQuery = '';
     notifyListeners();
+  }
+
+  /// Geçerli seçili metni veya ilk eşleşmeyi değiştirir
+  void replaceCurrentMatch(String replacement) {
+    if (_searchMatches.isEmpty) return;
+
+    int matchIndex = _searchMatches[_currentSearchMatchIndex];
+    int matchLength = _currentSearchQuery.length;
+
+    // Seçili metni sil ve yeni metni ekle
+    engine.delete(matchIndex, matchLength);
+    engine.insert(matchIndex, replacement);
+
+    // Not: Metin değiştiği için tüm eşleşmeleri yeniden bulmak gerekir
+    // Eski eşleşmeler geçersiz oldu, yeniden ara
+    String newText = engine.getText();
+    // İmleci yeni metnin sonuna koy (kullanıcı rahatça devam etsin)
+    cursorIndex = matchIndex + replacement.length;
+    selectionBase = null;
+    setDirty();
+
+    // Aramayı yeniden yap
+    findText(_currentSearchQuery);
+  }
+
+  /// Tüm eşleşmeleri değiştirir
+  void replaceAllMatches(String replacement) {
+    if (_searchMatches.isEmpty) return;
+
+    // Ters sırada değiştir (sondan başa) ki indeksler kaymasın
+    List<int> reversedMatches = List.from(_searchMatches.reversed);
+    for (int matchIndex in reversedMatches) {
+      int matchLength = _currentSearchQuery.length;
+      engine.delete(matchIndex, matchLength);
+      engine.insert(matchIndex, replacement);
+    }
+
+    // İmleci en sona koy
+    cursorIndex = engine.getText().length;
+    selectionBase = null;
+    setDirty();
+
+    // Aramayı yeniden yap (yeni metinle)
+    findText(_currentSearchQuery);
   }
 }

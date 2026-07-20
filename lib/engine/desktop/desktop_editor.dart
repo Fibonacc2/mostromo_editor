@@ -379,6 +379,8 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
           _cachedMaxWidth = _currentMaxWidth;
           _cachedIsPageMode = isPageMode;
 
+          provider.setCachedLines(_cachedLines!);
+
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) _extractOutline(provider);
           });

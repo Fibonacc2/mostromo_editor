@@ -26,6 +26,15 @@ class DesktopKeyboardHandler {
     final logicalKey = event.logicalKey;
     final character = event.character;
 
+    // 🌟 YENİ: ESC tuşu ile arama çubuğunu kapat
+    if (logicalKey == LogicalKeyboardKey.escape) {
+      if (EditorMenus.isFindBarOpen()) {
+        EditorMenus.closeFindBar(context);
+        return true; // Tüketildi, başka işlem yapma
+      }
+      return false; // Arama çubuğu açık değilse ESC'yi tüketme (istemciye bırak)
+    }
+
     // 🌟 OPTİMİZASYON 2: Doğrudan donanımdan (HardwareKeyboard) Ctrl/Shift durumunu çek
     final isCtrl =
         HardwareKeyboard.instance.isControlPressed ||
