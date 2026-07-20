@@ -279,6 +279,23 @@ class EditorToolbar extends StatelessWidget {
                 context.read<EditorProvider>().toggleOutlineVisible();
               },
             ),
+
+            _buildDivider(),
+
+            _ToolbarButton(
+              icon: Icons.settings_overscan_rounded,
+              tooltip: 'Sayfa Kenarlıkları',
+              isActive: false,
+              onPressed: () => _showMarginDialog(context, provider),
+            ),
+            _buildDivider(), // 🌟 Araya ayırıcı çizgi
+            // 🌟 YENİ: SAYFA NUMARASI BUTONU
+            _ToolbarButton(
+              icon: Icons.numbers_rounded,
+              tooltip: 'Sayfa Numaraları',
+              isActive: provider.showPageNumbers,
+              onPressed: () => _showPageNumberDialog(context, provider),
+            ),
           ],
         ),
       ),
@@ -435,6 +452,167 @@ class EditorToolbar extends StatelessWidget {
               size: 16,
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  // 🌟 YENİ: Görsel Sayfa Numarası Ayar Menüsü
+  void _showPageNumberDialog(BuildContext context, EditorProvider provider) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E1E),
+        title: const Text(
+          'Sayfa Numaraları',
+          style: TextStyle(color: Colors.white, fontSize: 16),
+        ),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: Colors.white10),
+        ),
+        content: StatefulBuilder(
+          builder: (context, setState) {
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SwitchListTile(
+                  title: const Text(
+                    'Numaraları Göster',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  value: provider.showPageNumbers,
+                  activeColor: MostromoTheme.accentColor,
+                  contentPadding: EdgeInsets.zero,
+                  onChanged: (val) {
+                    provider.togglePageNumbers();
+                    setState(() {}); // Diyalog içindeki UI'ı yenile
+                  },
+                ),
+                if (provider.showPageNumbers) ...[
+                  const Divider(color: Colors.white10, height: 24),
+                  const Text(
+                    "Konum Seçin",
+                    style: TextStyle(color: Colors.white54, fontSize: 13),
+                  ),
+
+                  // 🌟 İNTERAKTİF A4 ŞABLONU
+                  Center(
+                    child: Container(
+                      width: 140,
+                      height: 198, // A4 Kağıdı oranı
+                      margin: const EdgeInsets.symmetric(vertical: 16),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.05),
+                        border: Border.all(color: Colors.white24, width: 2),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Stack(
+                        children: [
+                          // İçerikteki sahte (dummy) çizgiler
+                          Center(
+                            child: Container(
+                              width: 80,
+                              height: 120,
+                              decoration: BoxDecoration(
+                                border: Border.all(color: Colors.white10),
+                              ),
+                              child: Column(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceEvenly,
+                                children: List.generate(
+                                  6,
+                                  (index) => Container(
+                                    height: 2,
+                                    width: 60,
+                                    color: Colors.white10,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                          // Etkileşimli Köşeler
+                          _buildAlignDot(provider, Alignment.topLeft, setState),
+                          _buildAlignDot(
+                            provider,
+                            Alignment.topCenter,
+                            setState,
+                          ),
+                          _buildAlignDot(
+                            provider,
+                            Alignment.topRight,
+                            setState,
+                          ),
+                          _buildAlignDot(
+                            provider,
+                            Alignment.bottomLeft,
+                            setState,
+                          ),
+                          _buildAlignDot(
+                            provider,
+                            Alignment.bottomCenter,
+                            setState,
+                          ),
+                          _buildAlignDot(
+                            provider,
+                            Alignment.bottomRight,
+                            setState,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAlignDot(
+    EditorProvider provider,
+    Alignment align,
+    void Function(void Function()) setState,
+  ) {
+    final bool isSelected = provider.pageNumberAlignment == align;
+    return Align(
+      alignment: align,
+      child: GestureDetector(
+        onTap: () {
+          provider.setPageNumberAlignment(align);
+          setState(() {}); // Anlık olarak tıklanan noktayı parlatır
+        },
+        child: Container(
+          margin: const EdgeInsets.all(8),
+          width: 24,
+          height: 24,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: isSelected
+                ? MostromoTheme.accentColor
+                : const Color(0xFF161616),
+            border: Border.all(
+              color: isSelected ? Colors.white : Colors.white38,
+              width: isSelected ? 2 : 1,
+            ),
+            boxShadow: isSelected
+                ? [
+                    BoxShadow(
+                      color: MostromoTheme.accentColor.withValues(alpha: 0.5),
+                      blurRadius: 8,
+                    ),
+                  ]
+                : null,
+          ),
+          child: isSelected
+              ? const Icon(Icons.numbers_rounded, size: 14, color: Colors.black)
+              : null,
         ),
       ),
     );

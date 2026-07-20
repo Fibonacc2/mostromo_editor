@@ -50,6 +50,10 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
   bool _isDraggingSelection = false;
   Offset? _lastPanGlobalPos;
 
+  // 🌟 YENİ: Kaydırma Sayfası Göstergesi için Değişkenler
+  final ValueNotifier<int?> _scrollPageNotifier = ValueNotifier<int?>(null);
+  Timer? _scrollIndicatorTimer;
+
   @override
   void initState() {
     super.initState();
@@ -103,6 +107,8 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
     _cursorTimer?.cancel();
     _showCursorNotifier.dispose();
     _measurer.clearCache();
+    _scrollPageNotifier.dispose(); // Bellek sızıntısını önle
+    _scrollIndicatorTimer?.cancel();
     super.dispose();
   }
 
@@ -154,7 +160,14 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
             .substring(line.startOffset, line.startOffset + line.length)
             .trim();
         if (text.isNotEmpty) {
-          int level = size >= 24.0 ? 1 : (size >= 20.0 ? 2 : 3);
+          int level;
+          if (size >= 24.0) {
+            level = 1;
+          } else if (size >= 20.0) {
+            level = 2;
+          } else {
+            level = 3;
+          }
 
           if (outline.isNotEmpty &&
               outline.last['offset'] + outline.last['text'].length >=
@@ -164,7 +177,7 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
             outline.add({
               'text': text,
               'level': level,
-              'dy': _cachedLayout!.logicalToPhysicalY(line.dy),
+              'dy': line.dy,
               'offset': line.startOffset,
             });
           }
@@ -179,10 +192,14 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
       return provider.cursorIndex;
     }
 
-    double logicalY = _cachedLayout!.physicalToLogicalY(localPosition.dy);
-    double logicalX =
-        localPosition.dx -
-        (provider.isPageMode ? _cachedLayout!.marginLeft : 32.0);
+    double logicalY = localPosition.dy;
+    double logicalX;
+
+    if (provider.isPageMode) {
+      logicalX = localPosition.dx - _cachedLayout!.marginLeft;
+    } else {
+      logicalX = localPosition.dx - 32.0;
+    }
 
     LogicalLine? targetLine;
     for (var line in _cachedLines!) {
@@ -193,18 +210,16 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
     }
 
     if (targetLine == null) {
-      return logicalY < 0 ? 0 : provider.engine.getText().length;
+      if (logicalY < 0) {
+        return 0;
+      } else {
+        return provider.engine.getText().length;
+      }
     }
 
-    final spans = targetLine.words
-        .map((w) => TextSpan(text: w.text, style: w.style))
-        .toList();
-    final painter = TextPainter(
-      text: TextSpan(children: spans),
-      textDirection: TextDirection.ltr,
-    )..layout();
-
-    final position = painter.getPositionForOffset(Offset(logicalX, 0));
+    final position = targetLine.textPainter.getPositionForOffset(
+      Offset(logicalX, 0),
+    );
     int localOffset = position.offset;
 
     if (localOffset > targetLine.length) {
@@ -224,13 +239,15 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
 
     int len = provider.engine.getText().length;
 
-    // 🌟 ÇÖZÜM: Hangi satırda olduğumuzu çok daha kesin (gap'siz) bir sınır testiyle buluyoruz
     int currentLineIdx = -1;
     for (int i = 0; i < _cachedLines!.length; i++) {
       int start = _cachedLines![i].startOffset;
-      int end = (i + 1 < _cachedLines!.length)
-          ? _cachedLines![i + 1].startOffset
-          : len + 1;
+      int end;
+      if (i + 1 < _cachedLines!.length) {
+        end = _cachedLines![i + 1].startOffset;
+      } else {
+        end = len + 1;
+      }
 
       if (provider.cursorIndex >= start && provider.cursorIndex < end) {
         currentLineIdx = i;
@@ -250,21 +267,19 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
       localOffset = currentLine.length;
     }
 
-    final spans = currentLine.words
-        .map((w) => TextSpan(text: w.text, style: w.style))
-        .toList();
-    final painter = TextPainter(
-      text: TextSpan(children: spans),
-      textDirection: TextDirection.ltr,
-    )..layout();
-    final currentOffset = painter.getOffsetForCaret(
+    final currentOffset = currentLine.textPainter.getOffsetForCaret(
       TextPosition(offset: localOffset, affinity: TextAffinity.downstream),
       Rect.zero,
     );
 
     _intendedCursorX ??= currentOffset.dx;
 
-    int targetLineIdx = isUp ? currentLineIdx - 1 : currentLineIdx + 1;
+    int targetLineIdx;
+    if (isUp) {
+      targetLineIdx = currentLineIdx - 1;
+    } else {
+      targetLineIdx = currentLineIdx + 1;
+    }
 
     if (targetLineIdx < 0) {
       return 0;
@@ -274,15 +289,8 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
     }
 
     LogicalLine targetLine = _cachedLines![targetLineIdx];
-    final targetSpans = targetLine.words
-        .map((w) => TextSpan(text: w.text, style: w.style))
-        .toList();
-    final targetPainter = TextPainter(
-      text: TextSpan(children: targetSpans),
-      textDirection: TextDirection.ltr,
-    )..layout();
 
-    final newPosition = targetPainter.getPositionForOffset(
+    final newPosition = targetLine.textPainter.getPositionForOffset(
       Offset(_intendedCursorX!, 0),
     );
     int newLocalOffset = newPosition.offset;
@@ -308,7 +316,11 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
         String currentText = provider.engine.getText();
         bool isPageMode = provider.isPageMode;
 
-        _currentMaxWidth = isPageMode ? 800.0 : constraints.maxWidth;
+        if (isPageMode) {
+          _currentMaxWidth = 800.0;
+        } else {
+          _currentMaxWidth = constraints.maxWidth;
+        }
 
         if (_cachedLines == null ||
             _cachedVersion != provider.engine.version ||
@@ -317,13 +329,23 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
             _cachedIsPageMode != isPageMode) {
           double a4Width = _currentMaxWidth;
           double a4Height = a4Width * 1.4142;
-          double printableWidth = isPageMode
-              ? a4Width - mLeft - mRight
-              : a4Width - 64;
+
+          double printableWidth;
+          if (isPageMode) {
+            printableWidth = a4Width - mLeft - mRight;
+          } else {
+            printableWidth = a4Width - 64;
+          }
+
           if (printableWidth < 100) printableWidth = 100;
-          double printableHeight = isPageMode
-              ? a4Height - mTop - mBottom
-              : double.infinity;
+
+          double printableHeight;
+          if (isPageMode) {
+            printableHeight = a4Height - mTop - mBottom;
+          } else {
+            printableHeight = double.infinity;
+          }
+
           if (printableHeight < 100) printableHeight = 100;
 
           final result = _layouter.layout(
@@ -332,6 +354,9 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
             printableWidth: printableWidth,
             printableHeight: printableHeight,
             isPageMode: isPageMode,
+            a4Height: a4Height,
+            marginTop: mTop,
+            pageGap: 32.0,
           );
 
           _cachedLines = result.lines;
@@ -345,10 +370,8 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
             marginBottom: isPageMode ? mBottom : 32,
             marginLeft: isPageMode ? mLeft : 32,
             marginRight: isPageMode ? mRight : 32,
-            pageBreaks: result.pageBreaks,
-            logicalHeight: isPageMode
-                ? result.totalLogicalHeight
-                : result.totalLogicalHeight + 64,
+            totalPages: result.totalPages,
+            physicalHeight: result.totalPhysicalHeight,
           );
 
           _cachedVersion = provider.engine.version;
@@ -364,12 +387,14 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
         if (_cachedLines != null) {
           int currentLineIdx = -1;
 
-          // 🌟 ÇÖZÜM: Satır ve Sütun sayacını da yeni eşleştirme mantığıyla güncelledik.
           for (int i = 0; i < _cachedLines!.length; i++) {
             int start = _cachedLines![i].startOffset;
-            int end = (i + 1 < _cachedLines!.length)
-                ? _cachedLines![i + 1].startOffset
-                : currentText.length + 1;
+            int end;
+            if (i + 1 < _cachedLines!.length) {
+              end = _cachedLines![i + 1].startOffset;
+            } else {
+              end = currentText.length + 1;
+            }
 
             if (provider.cursorIndex >= start && provider.cursorIndex < end) {
               currentLineIdx = i;
@@ -397,6 +422,20 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
           customPaintHeight = constraints.maxHeight;
         }
 
+        int finalCursorIndex = provider.cursorIndex.clamp(
+          0,
+          currentText.length,
+        );
+        int? finalSelectionBase;
+        if (widget.isReadingMode || provider.selectionBase == null) {
+          finalSelectionBase = null;
+        } else {
+          finalSelectionBase = provider.selectionBase!.clamp(
+            0,
+            currentText.length,
+          );
+        }
+
         return Theme(
           data: Theme.of(context).copyWith(
             scrollbarTheme: ScrollbarThemeData(
@@ -411,153 +450,243 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
           child: NotificationListener<ScrollNotification>(
             onNotification: (scrollInfo) {
               _hideMiniToolbar();
+              // 🌟 YENİ: Kaydırma miktarını dinle ve sayfayı hesapla
+              if (provider.isPageMode &&
+                  _cachedLayout != null &&
+                  scrollInfo is ScrollUpdateNotification) {
+                double physicalY = scrollInfo.metrics.pixels;
+                double pageAndGap =
+                    _cachedLayout!.a4Height + _cachedLayout!.pageGap;
+                int currentPage = (physicalY / pageAndGap).floor() + 1;
+                currentPage = currentPage.clamp(1, _cachedLayout!.totalPages);
+
+                if (_scrollPageNotifier.value != currentPage) {
+                  _scrollPageNotifier.value = currentPage;
+                }
+
+                // Kaydırma bitince göstergeyi kaybetmek için sayacı sıfırla
+                _scrollIndicatorTimer?.cancel();
+                _scrollIndicatorTimer = Timer(
+                  const Duration(milliseconds: 1200),
+                  () {
+                    if (mounted) _scrollPageNotifier.value = null;
+                  },
+                );
+              }
               return false;
             },
-            child: SingleChildScrollView(
-              controller: provider.scrollController,
-              physics: const ClampingScrollPhysics(),
-              child: Container(
-                width: constraints.maxWidth,
-                constraints: BoxConstraints(minHeight: constraints.maxHeight),
-                alignment: Alignment.topCenter,
-                color: provider.isPageMode
-                    ? const Color(0xFF050505)
-                    : Colors.transparent,
-                padding: provider.isPageMode
-                    ? const EdgeInsets.symmetric(vertical: 32)
-                    : EdgeInsets.zero,
-                child: MouseRegion(
-                  cursor: widget.isReadingMode
-                      ? SystemMouseCursors.basic
-                      : SystemMouseCursors.text,
-                  child: GestureDetector(
-                    onSecondaryTapDown: widget.isReadingMode
-                        ? null
-                        : (details) {
-                            _hideMiniToolbar();
-                            _focusNode.requestFocus();
-                            int idx = _getOffsetIndex(
-                              details.localPosition,
-                              provider,
-                            );
+            child: Stack(
+              children: [
+                SingleChildScrollView(
+                  controller: provider.scrollController,
+                  physics: const ClampingScrollPhysics(),
+                  child: Container(
+                    width: constraints.maxWidth,
+                    constraints: BoxConstraints(
+                      minHeight: constraints.maxHeight,
+                    ),
+                    alignment: Alignment.topCenter,
+                    color: provider.isPageMode
+                        ? const Color(0xFF050505)
+                        : Colors.transparent,
+                    padding: provider.isPageMode
+                        ? const EdgeInsets.symmetric(vertical: 32)
+                        : EdgeInsets.zero,
+                    child: MouseRegion(
+                      cursor: widget.isReadingMode
+                          ? SystemMouseCursors.basic
+                          : SystemMouseCursors.text,
+                      child: GestureDetector(
+                        onSecondaryTapDown: widget.isReadingMode
+                            ? null
+                            : (details) {
+                                _hideMiniToolbar();
+                                _focusNode.requestFocus();
+                                int idx = _getOffsetIndex(
+                                  details.localPosition,
+                                  provider,
+                                );
 
-                            if (!provider.hasSelection) {
-                              provider.updateSelection(idx, null);
-                            } else {
-                              int min = math.min(
-                                provider.selectionBase!,
-                                provider.cursorIndex,
-                              );
-                              int max = math.max(
-                                provider.selectionBase!,
-                                provider.cursorIndex,
-                              );
-                              if (idx < min || idx > max) {
+                                if (!provider.hasSelection) {
+                                  provider.updateSelection(idx, null);
+                                } else {
+                                  int min = math.min(
+                                    provider.selectionBase!,
+                                    provider.cursorIndex,
+                                  );
+                                  int max = math.max(
+                                    provider.selectionBase!,
+                                    provider.cursorIndex,
+                                  );
+                                  if (idx < min || idx > max) {
+                                    provider.updateSelection(idx, null);
+                                  }
+                                }
+                                EditorMenus.showDesktopContextMenu(
+                                  context,
+                                  details.globalPosition,
+                                  provider,
+                                  _hideMiniToolbar,
+                                );
+                              },
+                        onTapDown: widget.isReadingMode
+                            ? null
+                            : (details) {
+                                _hideMiniToolbar();
+                                _focusNode.requestFocus();
+                                _intendedCursorX = null;
+                                int idx = _getOffsetIndex(
+                                  details.localPosition,
+                                  provider,
+                                );
                                 provider.updateSelection(idx, null);
-                              }
-                            }
-                            EditorMenus.showDesktopContextMenu(
-                              context,
-                              details.globalPosition,
-                              provider,
-                              _hideMiniToolbar,
-                            );
-                          },
-                    onTapDown: widget.isReadingMode
-                        ? null
-                        : (details) {
-                            _hideMiniToolbar();
-                            _focusNode.requestFocus();
-                            _intendedCursorX = null;
-                            int idx = _getOffsetIndex(
-                              details.localPosition,
-                              provider,
-                            );
-                            provider.updateSelection(idx, null);
 
-                            _isDraggingSelection = true;
-                            _startBlinking();
-                          },
-                    onPanUpdate: widget.isReadingMode
-                        ? null
-                        : (details) {
-                            _lastPanGlobalPos = details.globalPosition;
-                            if (!_isDraggingSelection) return;
-                            int idx = _getOffsetIndex(
-                              details.localPosition,
-                              provider,
-                            );
+                                _isDraggingSelection = true;
+                                _startBlinking();
+                              },
+                        onPanUpdate: widget.isReadingMode
+                            ? null
+                            : (details) {
+                                _lastPanGlobalPos = details.globalPosition;
+                                if (!_isDraggingSelection) return;
+                                int idx = _getOffsetIndex(
+                                  details.localPosition,
+                                  provider,
+                                );
 
-                            if (provider.selectionBase == null) {
-                              provider.updateSelection(
-                                idx,
-                                provider.cursorIndex,
-                              );
+                                if (provider.selectionBase == null) {
+                                  provider.updateSelection(
+                                    idx,
+                                    provider.cursorIndex,
+                                  );
+                                } else {
+                                  provider.updateSelection(
+                                    idx,
+                                    provider.selectionBase,
+                                  );
+                                }
+                                _startBlinking();
+                              },
+                        onPanEnd: widget.isReadingMode
+                            ? null
+                            : (details) {
+                                _isDraggingSelection = false;
+                                if (provider.hasSelection &&
+                                    _lastPanGlobalPos != null) {
+                                  _showMiniToolbarWrapper(
+                                    _lastPanGlobalPos!,
+                                    provider,
+                                  );
+                                }
+                              },
+                        onDoubleTapDown: widget.isReadingMode
+                            ? null
+                            : (details) {
+                                _hideMiniToolbar();
+                                _focusNode.requestFocus();
+                                _intendedCursorX = null;
+                                int idx = _getOffsetIndex(
+                                  details.localPosition,
+                                  provider,
+                                );
+                                provider.selectWordAt(idx);
+                                _showMiniToolbarWrapper(
+                                  details.globalPosition,
+                                  provider,
+                                );
+                                _startBlinking();
+                              },
+                        child: ValueListenableBuilder<bool>(
+                          valueListenable: _showCursorNotifier,
+                          builder: (context, showCursor, child) {
+                            bool cursorState;
+                            if (widget.isReadingMode) {
+                              cursorState = false;
                             } else {
-                              provider.updateSelection(
-                                idx,
-                                provider.selectionBase,
-                              );
+                              cursorState = showCursor;
                             }
-                            _startBlinking();
-                          },
-                    onPanEnd: widget.isReadingMode
-                        ? null
-                        : (details) {
-                            _isDraggingSelection = false;
-                            if (provider.hasSelection &&
-                                _lastPanGlobalPos != null) {
-                              _showMiniToolbarWrapper(
-                                _lastPanGlobalPos!,
-                                provider,
-                              );
-                            }
-                          },
-                    onDoubleTapDown: widget.isReadingMode
-                        ? null
-                        : (details) {
-                            _hideMiniToolbar();
-                            _focusNode.requestFocus();
-                            _intendedCursorX = null;
-                            int idx = _getOffsetIndex(
-                              details.localPosition,
-                              provider,
+
+                            return RepaintBoundary(
+                              child: CustomPaint(
+                                size: Size(_currentMaxWidth, customPaintHeight),
+                                painter: EditorPainter(
+                                  lines: _cachedLines!,
+                                  layout: _cachedLayout!,
+                                  plainTextLength: currentText.length,
+                                  cursorIndex: finalCursorIndex,
+                                  selectionBase: finalSelectionBase,
+                                  showCursor: cursorState,
+                                  currentFontSize:
+                                      provider.currentFontSize ?? 16.0,
+                                  imageCache: provider.imageCache,
+                                  isMobile: false,
+                                  scrollController: provider.scrollController,
+                                  showPageNumbers: provider.showPageNumbers,
+                                  pageNumberAlignment:
+                                      provider.pageNumberAlignment,
+                                  searchMatches: provider.searchMatches,
+                                  currentSearchQuery:
+                                      provider.currentSearchQuery,
+                                ),
+                              ),
                             );
-                            provider.selectWordAt(idx);
-                            _showMiniToolbarWrapper(
-                              details.globalPosition,
-                              provider,
-                            );
-                            _startBlinking();
                           },
-                    child: ValueListenableBuilder<bool>(
-                      valueListenable: _showCursorNotifier,
-                      builder: (context, showCursor, child) {
-                        return RepaintBoundary(
-                          child: CustomPaint(
-                            size: Size(_currentMaxWidth, customPaintHeight),
-                            painter: EditorPainter(
-                              lines: _cachedLines!,
-                              layout: _cachedLayout!,
-                              plainTextLength: provider.engine.getText().length,
-                              cursorIndex: provider.cursorIndex,
-                              selectionBase: widget.isReadingMode
-                                  ? null
-                                  : provider.selectionBase,
-                              showCursor: widget.isReadingMode
-                                  ? false
-                                  : showCursor,
-                              currentFontSize: provider.currentFontSize ?? 16.0,
-                              imageCache: provider.imageCache,
-                              isMobile: false,
-                            ),
-                          ),
-                        );
-                      },
+                        ),
+                      ),
                     ),
                   ),
                 ),
-              ),
+
+                // 🌟 YENİ: YÜZEN SAYFA GÖSTERGESİ (Floating Badge)
+                ValueListenableBuilder<int?>(
+                  valueListenable: _scrollPageNotifier,
+                  builder: (context, page, child) {
+                    return AnimatedPositioned(
+                      duration: const Duration(milliseconds: 200),
+                      curve: Curves.easeOutCubic,
+                      right: page != null
+                          ? 32.0
+                          : -100.0, // Kaydırma yoksa ekran dışına uçar
+                      top:
+                          constraints.maxHeight / 2 -
+                          20, // Ekranın dikey merkezinde durur
+                      child: AnimatedOpacity(
+                        duration: const Duration(milliseconds: 200),
+                        opacity: page != null ? 1.0 : 0.0,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1E1E1E),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                              color: const Color(
+                                0xFF00E5FF,
+                              ).withValues(alpha: 0.1),
+                            ), // Temamızın (MostromoTheme) accent rengi
+                            boxShadow: const [
+                              BoxShadow(
+                                color: Colors.black54,
+                                blurRadius: 10,
+                                offset: Offset(0, 4),
+                              ),
+                            ],
+                          ),
+                          child: Text(
+                            "Sayfa ${page ?? 1}",
+                            style: const TextStyle(
+                              color: Color.fromARGB(170, 179, 175, 175),
+                              fontWeight: FontWeight.normal,
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ],
             ),
           ),
         );
@@ -573,6 +702,7 @@ class _DesktopEditorWidgetState extends State<DesktopEditorWidget> {
         bool handled = DesktopKeyboardHandler.handle(
           event,
           context.read<EditorProvider>(),
+          context,
           onSave: () => widget.onSave?.call(),
           onHideMiniToolbar: _hideMiniToolbar,
           onStartBlinking: _startBlinking,

@@ -313,4 +313,134 @@ class EditorMenus {
       provider.insertText(data.text!);
     }
   }
+
+  // 🌟 YENİ: Arama Çubuğu Overlay Bileşeni
+  static OverlayEntry? _findBarEntry;
+
+  static void toggleFindBar(
+    BuildContext context,
+    EditorProvider provider,
+    VoidCallback hideContextMenu,
+  ) {
+    hideContextMenu();
+    if (_findBarEntry != null) {
+      _findBarEntry!.remove();
+      _findBarEntry = null;
+      provider.clearSearch();
+      return;
+    }
+
+    final TextEditingController searchCtrl = TextEditingController();
+
+    _findBarEntry = OverlayEntry(
+      builder: (context) {
+        return Positioned(
+          top: 60,
+          right: 48,
+          child: Material(
+            color: Colors.transparent,
+            child: Container(
+              width: 320,
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: const Color(0xFF222222),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: MostromoTheme.accentColor.withValues(alpha: 0.5),
+                  width: 1,
+                ),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Colors.black54,
+                    blurRadius: 20,
+                    offset: Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: searchCtrl,
+                      autofocus: true,
+                      style: const TextStyle(color: Colors.white, fontSize: 13),
+                      decoration: const InputDecoration(
+                        hintText: 'Belgede ara...',
+                        hintStyle: TextStyle(color: Colors.white54),
+                        isDense: true,
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        border: InputBorder.none,
+                      ),
+                      onChanged: (val) => provider.findText(val),
+                      onSubmitted: (_) => provider.findNext(),
+                    ),
+                  ),
+                  ListenableBuilder(
+                    listenable: provider,
+                    builder: (context, _) {
+                      int count = provider.searchMatches.length;
+                      int current = count > 0
+                          ? provider.currentSearchMatchIndex + 1
+                          : 0;
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                        child: Text(
+                          count > 0 ? '$current/$count' : '0/0',
+                          style: const TextStyle(
+                            color: Colors.white54,
+                            fontSize: 11,
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  IconButton(
+                    icon: const Icon(
+                      Icons.keyboard_arrow_up_rounded,
+                      color: Colors.white,
+                      size: 18,
+                    ),
+                    constraints: const BoxConstraints(),
+                    padding: const EdgeInsets.all(4),
+                    onPressed: () => provider.findPrevious(),
+                    tooltip: 'Önceki Eşleşme',
+                  ),
+                  IconButton(
+                    icon: const Icon(
+                      Icons.keyboard_arrow_down_rounded,
+                      color: Colors.white,
+                      size: 18,
+                    ),
+                    constraints: const BoxConstraints(),
+                    padding: const EdgeInsets.all(4),
+                    onPressed: () => provider.findNext(),
+                    tooltip: 'Sonraki Eşleşme',
+                  ),
+                  IconButton(
+                    icon: const Icon(
+                      Icons.close_rounded,
+                      color: Colors.white54,
+                      size: 18,
+                    ),
+                    constraints: const BoxConstraints(),
+                    padding: const EdgeInsets.all(4),
+                    onPressed: () {
+                      provider.clearSearch();
+                      _findBarEntry?.remove();
+                      _findBarEntry = null;
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+
+    Overlay.of(context).insert(_findBarEntry!);
+  }
 }

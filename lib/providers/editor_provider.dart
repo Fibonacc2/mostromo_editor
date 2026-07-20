@@ -59,6 +59,17 @@ class EditorProvider extends ChangeNotifier {
   bool get hasSelection =>
       selectionBase != null && selectionBase != cursorIndex;
 
+  // --- İMLEÇ GEÇMİŞİ (UNDO/REDO SENKRONİZASYONU) ---
+  final List<int> _undoCursorStack = [];
+  final List<int> _redoCursorStack = [];
+
+  // Metne yazı eklendiğinde veya silindiğinde çağrılır
+  void registerActionForHistory() {
+    _undoCursorStack.add(cursorIndex);
+    _redoCursorStack
+        .clear(); // Yeni eylem yapıldığında ileri alma geçmişi silinir
+  }
+
   void updateTitle(String newTitle) {
     if (_documentTitle != newTitle) {
       _documentTitle = newTitle;
@@ -160,6 +171,25 @@ class EditorProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  // --- SAYFA NUMARASI YÖNETİMİ ---
+  bool _showPageNumbers = false;
+  bool get showPageNumbers => _showPageNumbers;
+
+  Alignment _pageNumberAlignment = Alignment.bottomCenter;
+  Alignment get pageNumberAlignment => _pageNumberAlignment;
+
+  void togglePageNumbers() {
+    _showPageNumbers = !_showPageNumbers;
+    setDirty();
+    notifyListeners();
+  }
+
+  void setPageNumberAlignment(Alignment alignment) {
+    _pageNumberAlignment = alignment;
+    setDirty();
+    notifyListeners();
+  }
+
   int get currentHeadingLevel {
     if (_currentFontSize == 32.0 && _isBold) return 1;
     if (_currentFontSize == 24.0 && _isBold) return 2;
@@ -180,6 +210,11 @@ class EditorProvider extends ChangeNotifier {
       _marginBottom = (jsonMap['mb'] ?? 96.0).toDouble();
       _marginLeft = (jsonMap['ml'] ?? 96.0).toDouble();
       _marginRight = (jsonMap['mr'] ?? 96.0).toDouble();
+      // 🌟 YENİ: Sayfa Numarası Yükleme
+      _showPageNumbers = jsonMap['spn'] ?? false;
+      double pnx = (jsonMap['pn_x'] ?? 0.0).toDouble();
+      double pny = (jsonMap['pn_y'] ?? 1.0).toDouble();
+      _pageNumberAlignment = Alignment(pnx, pny);
     } catch (e) {
       engine = PieceTable(initialText: mroDataOrText);
     }
@@ -201,6 +236,10 @@ class EditorProvider extends ChangeNotifier {
     data['mb'] = _marginBottom;
     data['ml'] = _marginLeft;
     data['mr'] = _marginRight;
+    // 🌟 YENİ: Sayfa Numarası Kaydetme
+    data['spn'] = _showPageNumbers;
+    data['pn_x'] = _pageNumberAlignment.x;
+    data['pn_y'] = _pageNumberAlignment.y;
     return data;
   }
 
@@ -310,7 +349,26 @@ class EditorProvider extends ChangeNotifier {
       }
       _currentFontSize = isMixed ? null : firstSize;
     } else {
-      int targetIndex = cursorIndex > 0 ? cursorIndex - 1 : 0;
+      // 🌟 ÇÖZÜM BURADA: İmleç stilini belirleme algoritması akıllandırıldı
+      String text = engine.getText();
+      int targetIndex;
+
+      if (cursorIndex == 0) {
+        // En baştaysak ilk karakterin stilini al
+        targetIndex = 0;
+      } else if (cursorIndex > 0 &&
+          cursorIndex <= text.length &&
+          text[cursorIndex - 1] == '\n') {
+        // İmleç yeni bir satırın EN BAŞINDA (kendisinden önceki karakter \n)
+        // Bu durumda stili önceki satırdan (\n'den) değil, bulunduğumuz satırın ilk karakterinden almalıyız!
+        targetIndex = (cursorIndex < text.length)
+            ? cursorIndex
+            : cursorIndex - 1;
+      } else {
+        // İmleç satırın ortasında veya sonunda, standart olarak solundaki karakterin stilini miras al
+        targetIndex = cursorIndex - 1;
+      }
+
       final currentStyle = engine.getStyleAt(targetIndex);
 
       _isBold = currentStyle.isBold;
@@ -394,6 +452,7 @@ class EditorProvider extends ChangeNotifier {
     if (!hasSelection) {
       return;
     }
+    registerActionForHistory();
     int start = math.min(selectionBase!, cursorIndex);
     int end = math.max(selectionBase!, cursorIndex);
 
@@ -410,6 +469,7 @@ class EditorProvider extends ChangeNotifier {
   }
 
   void insertText(String text) {
+    registerActionForHistory();
     if (hasSelection) {
       deleteSelection();
     }
@@ -434,6 +494,7 @@ class EditorProvider extends ChangeNotifier {
   }
 
   void deleteCharacter() {
+    registerActionForHistory();
     if (hasSelection) {
       deleteSelection();
     } else if (cursorIndex > 0) {
@@ -445,15 +506,24 @@ class EditorProvider extends ChangeNotifier {
       cursorIndex--;
       _syncToolbarWithCursor();
     }
+
     setDirty();
     notifyListeners();
   }
 
   void executeUndo() {
     if (engine.undo()) {
-      if (cursorIndex > engine.getText().length) {
-        cursorIndex = engine.getText().length;
+      // 🌟 KİLİT ÇÖZÜM: Geri almadan önce, mevcut imleci ileri alma (Redo) yığınına at
+      _redoCursorStack.add(cursorIndex);
+
+      // İmleci geçmişteki doğru konumuna geri çek
+      if (_undoCursorStack.isNotEmpty) {
+        cursorIndex = _undoCursorStack.removeLast();
       }
+
+      // Güvenlik: İmleç hiçbir koşulda metnin sınırlarını aşamaz
+      cursorIndex = cursorIndex.clamp(0, engine.getText().length);
+
       selectionBase = null;
       _syncToolbarWithCursor();
       preloadImages();
@@ -464,9 +534,17 @@ class EditorProvider extends ChangeNotifier {
 
   void executeRedo() {
     if (engine.redo()) {
-      if (cursorIndex > engine.getText().length) {
-        cursorIndex = engine.getText().length;
+      // 🌟 KİLİT ÇÖZÜM: İleri almadan önce, mevcut imleci geri alma (Undo) yığınına at
+      _undoCursorStack.add(cursorIndex);
+
+      // İmleci ileri (gelecekteki) konumuna çek
+      if (_redoCursorStack.isNotEmpty) {
+        cursorIndex = _redoCursorStack.removeLast();
       }
+
+      // Güvenlik: İmleç sınır koruması
+      cursorIndex = cursorIndex.clamp(0, engine.getText().length);
+
       selectionBase = null;
       _syncToolbarWithCursor();
       preloadImages();
@@ -707,5 +785,69 @@ class EditorProvider extends ChangeNotifier {
         curve: Curves.easeInOut,
       );
     }
+  }
+
+  // --- BUL (FIND) MOTORU DEĞİŞKENLERİ ---
+  List<int> _searchMatches = [];
+  int _currentSearchMatchIndex = -1;
+  String _currentSearchQuery = '';
+
+  List<int> get searchMatches => _searchMatches;
+  int get currentSearchMatchIndex => _currentSearchMatchIndex;
+  String get currentSearchQuery => _currentSearchQuery;
+
+  void findText(String query, {bool caseSensitive = false}) {
+    _searchMatches.clear();
+    _currentSearchMatchIndex = -1;
+    _currentSearchQuery = query;
+
+    if (query.isEmpty) {
+      notifyListeners();
+      return;
+    }
+
+    String text = engine.getText();
+    String targetText = caseSensitive ? text : text.toLowerCase();
+    String searchQuery = caseSensitive ? query : query.toLowerCase();
+
+    int startIndex = 0;
+    while (true) {
+      int matchIndex = targetText.indexOf(searchQuery, startIndex);
+      if (matchIndex == -1) break;
+
+      _searchMatches.add(matchIndex);
+      startIndex = matchIndex + searchQuery.length;
+    }
+
+    if (_searchMatches.isNotEmpty) {
+      _currentSearchMatchIndex = 0;
+      // Bulunan ilk eşleşmeye imleci götür ve seçili hale getir
+      updateSelection(_searchMatches[0] + query.length, _searchMatches[0]);
+    }
+    notifyListeners();
+  }
+
+  void findNext() {
+    if (_searchMatches.isEmpty) return;
+    _currentSearchMatchIndex =
+        (_currentSearchMatchIndex + 1) % _searchMatches.length;
+    int matchPos = _searchMatches[_currentSearchMatchIndex];
+    updateSelection(matchPos + _currentSearchQuery.length, matchPos);
+  }
+
+  void findPrevious() {
+    if (_searchMatches.isEmpty) return;
+    _currentSearchMatchIndex =
+        (_currentSearchMatchIndex - 1 + _searchMatches.length) %
+        _searchMatches.length;
+    int matchPos = _searchMatches[_currentSearchMatchIndex];
+    updateSelection(matchPos + _currentSearchQuery.length, matchPos);
+  }
+
+  void clearSearch() {
+    _searchMatches.clear();
+    _currentSearchMatchIndex = -1;
+    _currentSearchQuery = '';
+    notifyListeners();
   }
 }

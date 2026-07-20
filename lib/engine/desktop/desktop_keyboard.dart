@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:math' as math;
 
@@ -7,7 +8,8 @@ import '../../ui/editor/editor_menus.dart';
 class DesktopKeyboardHandler {
   static bool handle(
     KeyEvent event,
-    EditorProvider provider, {
+    EditorProvider provider,
+    BuildContext context, {
     required VoidCallback onSave,
     required VoidCallback onHideMiniToolbar,
     required VoidCallback onStartBlinking,
@@ -36,6 +38,10 @@ class DesktopKeyboardHandler {
     if (isCtrl) {
       if (logicalKey == LogicalKeyboardKey.keyS) {
         onSave();
+        return true;
+      } else if (logicalKey == LogicalKeyboardKey.keyF) {
+        // 🌟 EKLENDİ: Ctrl+F ile Arama Çubuğunu Aç
+        EditorMenus.toggleFindBar(context, provider, onHideMiniToolbar);
         return true;
       } else if (logicalKey == LogicalKeyboardKey.keyZ) {
         isShift ? provider.executeRedo() : provider.executeUndo();

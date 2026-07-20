@@ -27,6 +27,11 @@ class LogicalLine {
   final double dy;
   final int startOffset;
   final int length;
+  final TextAlign textAlign;
+  final double layoutWidth;
+
+  // 🌟 YENİ: Çizim Motoru Cache'i
+  final TextPainter textPainter;
 
   LogicalLine({
     required this.words,
@@ -35,6 +40,9 @@ class LogicalLine {
     required this.dy,
     required this.startOffset,
     required this.length,
+    required this.textAlign,
+    required this.layoutWidth,
+    required this.textPainter,
   });
 }
 
@@ -46,10 +54,12 @@ class CustomTextMeasurer {
   Size measure(String text, TextStyle style) {
     if (text.isEmpty) return const Size(0, 0);
 
-    // Satırlar arası mesafeyi daraltmak için yükseklik çarpanını 1.2'ye sabitleme
-    final TextStyle appliedStyle = style.height == null
-        ? style.copyWith(height: 1.2)
-        : style;
+    final TextStyle appliedStyle;
+    if (style.height == null) {
+      appliedStyle = style.copyWith(height: 1.2);
+    } else {
+      appliedStyle = style;
+    }
 
     final String cacheKey =
         '${text}_${appliedStyle.fontSize}_${appliedStyle.fontWeight}_${appliedStyle.fontFamily}_${appliedStyle.height}';
@@ -81,11 +91,30 @@ class LineBreaker {
 
   LineBreaker(this.measurer);
 
-  // 🌟 GÜNCELLEME: Artık tek bir TextStyle yerine paragrafa ait tüm Zengin Metin Span'lerini alıyor
+  // 🌟 YENİ: Tek seferlik TextPainter Üreticisi
+  TextPainter _createLinePainter(
+    List<WordItem> lineWords,
+    TextAlign align,
+    double width,
+  ) {
+    List<TextSpan> spans = [];
+    for (var w in lineWords) {
+      spans.add(TextSpan(text: w.text, style: w.style));
+    }
+    final painter = TextPainter(
+      text: TextSpan(children: spans),
+      textDirection: TextDirection.ltr,
+      textAlign: align,
+    );
+    painter.layout(minWidth: width, maxWidth: width);
+    return painter;
+  }
+
   List<LogicalLine> breakIntoLines({
     required List<TextSpan> spans,
     required double maxWidth,
     required int paragraphStartOffset,
+    required TextAlign textAlign,
   }) {
     List<LogicalLine> lines = [];
     List<WordItem> currentLineWords = [];
@@ -95,7 +124,6 @@ class LineBreaker {
     int currentLength = 0;
     int wordStartOffset = paragraphStartOffset;
 
-    // Eğer paragraf tamamen boşsa (Boş Enter satırı)
     if (spans.isEmpty ||
         (spans.length == 1 && (spans.first.text ?? '').isEmpty)) {
       TextStyle defaultStyle = const TextStyle(
@@ -107,6 +135,8 @@ class LineBreaker {
         defaultStyle = spans.first.style!.copyWith(height: 1.2);
       }
       final Size size = measurer.measure(' ', defaultStyle);
+      final emptyPainter = _createLinePainter([], textAlign, maxWidth);
+
       lines.add(
         LogicalLine(
           words: [],
@@ -115,20 +145,27 @@ class LineBreaker {
           dy: 0.0,
           startOffset: paragraphStartOffset,
           length: 0,
+          textAlign: textAlign,
+          layoutWidth: maxWidth,
+          textPainter: emptyPainter, // 🌟 CACHE EKLENDİ
         ),
       );
       return lines;
     }
 
-    // Paragrafın içindeki tüm zengin metin parçalarını tek tek dön
     for (var span in spans) {
       final String spanText = span.text ?? '';
       if (spanText.isEmpty) continue;
 
-      // Her parçanın kendi özgün stilini koru ve satır aralığını sıkıştır (height: 1.2)
-      final TextStyle spanStyle =
-          (span.style ?? const TextStyle(fontSize: 16, color: Colors.white))
-              .copyWith(height: 1.2);
+      final TextStyle spanStyle;
+      if (span.style == null) {
+        spanStyle = const TextStyle(
+          fontSize: 16,
+          color: Colors.white,
+        ).copyWith(height: 1.2);
+      } else {
+        spanStyle = span.style!.copyWith(height: 1.2);
+      }
 
       final matches = RegExp(r'(\s+|\S+)').allMatches(spanText);
 
@@ -138,6 +175,12 @@ class LineBreaker {
 
         if (currentLineWidth + size.width > maxWidth &&
             currentLineWords.isNotEmpty) {
+          final painter = _createLinePainter(
+            currentLineWords,
+            textAlign,
+            maxWidth,
+          );
+
           lines.add(
             LogicalLine(
               words: List.from(currentLineWords),
@@ -146,6 +189,9 @@ class LineBreaker {
               dy: 0.0,
               startOffset: currentLineWords.first.startIndex,
               length: currentLength,
+              textAlign: textAlign,
+              layoutWidth: maxWidth,
+              textPainter: painter, // 🌟 CACHE EKLENDİ
             ),
           );
 
@@ -173,6 +219,8 @@ class LineBreaker {
     }
 
     if (currentLineWords.isNotEmpty) {
+      final painter = _createLinePainter(currentLineWords, textAlign, maxWidth);
+
       lines.add(
         LogicalLine(
           words: List.from(currentLineWords),
@@ -181,6 +229,9 @@ class LineBreaker {
           dy: 0.0,
           startOffset: currentLineWords.first.startIndex,
           length: currentLength,
+          textAlign: textAlign,
+          layoutWidth: maxWidth,
+          textPainter: painter, // 🌟 CACHE EKLENDİ
         ),
       );
     }
@@ -188,23 +239,23 @@ class LineBreaker {
     return lines;
   }
 }
-
 // --- 4. SAYFA DİZGİCİSİ (DOCUMENT LAYOUTER) ---
 
 class DocumentLayoutResult {
   final List<LogicalLine> lines;
-  final double totalLogicalHeight;
-  final List<double> pageBreaks;
+  final double totalPhysicalHeight; // 🌟 YENİ: Tam sayfa uzunluğu
+  final int totalPages; // 🌟 YENİ: Toplam sayfa sayısı
 
   DocumentLayoutResult({
     required this.lines,
-    required this.totalLogicalHeight,
-    required this.pageBreaks,
+    required this.totalPhysicalHeight,
+    required this.totalPages,
   });
 }
 
 class DocumentLayouter {
   final LineBreaker breaker;
+  final Map<String, List<LogicalLine>> _blockCache = {};
 
   DocumentLayouter(this.breaker);
 
@@ -214,47 +265,88 @@ class DocumentLayouter {
     required double printableWidth,
     required double printableHeight,
     required bool isPageMode,
+    double a4Height = 0.0, // 🌟 YENİ
+    double marginTop = 0.0, // 🌟 YENİ
+    double pageGap = 0.0, // 🌟 YENİ
   }) {
     List<LogicalLine> allLines = [];
-    double currentY = 0.0;
-    List<double> breaks = [0.0];
-    double currentSubHeight = 0.0;
+    int currentPage = 0;
+    double currentSubY = 0.0;
+    double currentContinuousY = 32.0; // Sayfa modu kapalıysa üstten 32px boşluk
+    Map<String, List<LogicalLine>> newCache = {};
 
     for (var block in blocks) {
-      // 🌟 DÜZELTME: Tüm zengin metin span'lerini doğrudan kırıcıya gönderiyoruz, sızıntı engellendi!
-      List<LogicalLine> pLines = breaker.breakIntoLines(
-        spans: block.spans,
-        maxWidth: printableWidth,
-        paragraphStartOffset: block.startOffset,
+      StringBuffer sigBuilder = StringBuffer(
+        '${block.textAlign.index}_${printableWidth}_',
       );
+      for (var span in block.spans) {
+        sigBuilder.write(
+          '${span.text}_${span.style?.fontWeight}_${span.style?.fontSize}_${span.style?.fontStyle}_${span.style?.decoration}_',
+        );
+      }
+      String signature = sigBuilder.toString();
+      List<LogicalLine> templateLines;
 
-      for (var line in pLines) {
-        if (isPageMode &&
-            currentSubHeight + line.height > printableHeight &&
-            currentSubHeight > 0) {
-          breaks.add(currentY);
-          currentSubHeight = 0.0;
+      if (_blockCache.containsKey(signature)) {
+        templateLines = _blockCache[signature]!;
+      } else {
+        templateLines = breaker.breakIntoLines(
+          spans: block.spans,
+          maxWidth: printableWidth,
+          paragraphStartOffset: 0,
+          textAlign: block.textAlign,
+        );
+      }
+      newCache[signature] = templateLines;
+
+      for (var template in templateLines) {
+        double finalDy = 0.0;
+
+        // 🌟 KİLİT ÇÖZÜM: Mutlak (Absolute) Y Koordinatı Ataması
+        if (isPageMode) {
+          // Sayfa sınırını aştıysak yeni sayfaya zıpla
+          if (currentSubY + template.height > printableHeight &&
+              currentSubY > 0) {
+            currentPage++;
+            currentSubY = 0.0;
+          }
+
+          double pageTop = currentPage * (a4Height + pageGap);
+          // Satırın fiziksel konumu = Sayfa Başı + Üst Kenar Boşluğu + Sayfa İçi Konumu
+          finalDy = pageTop + marginTop + currentSubY;
+          currentSubY += template.height;
+        } else {
+          finalDy = currentContinuousY;
+          currentContinuousY += template.height;
         }
 
         LogicalLine positionedLine = LogicalLine(
-          words: line.words,
-          width: line.width,
-          height: line.height,
-          dy: currentY,
-          startOffset: line.startOffset,
-          length: line.length,
+          words: template.words,
+          width: template.width,
+          height: template.height,
+          dy: finalDy, // 🌟 Artık satırlar sayfada nerede duracaklarını kesin olarak biliyor!
+          startOffset: block.startOffset + template.startOffset,
+          length: template.length,
+          textAlign: template.textAlign,
+          layoutWidth: template.layoutWidth,
+          textPainter: template.textPainter,
         );
 
         allLines.add(positionedLine);
-        currentY += line.height;
-        currentSubHeight += line.height;
       }
     }
 
+    _blockCache.clear();
+    _blockCache.addAll(newCache);
+
+    double totalHeight = isPageMode
+        ? ((currentPage + 1) * (a4Height + pageGap))
+        : currentContinuousY + 32.0;
+
     return DocumentLayoutResult(
       lines: allLines,
-      totalLogicalHeight: currentY,
-      pageBreaks: breaks,
+      totalPhysicalHeight: totalHeight,
+      totalPages: isPageMode ? (currentPage + 1) : 1,
     );
   }
 }

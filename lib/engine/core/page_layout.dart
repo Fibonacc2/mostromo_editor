@@ -1,5 +1,3 @@
-// lib/engine/page_layout.dart
-
 class PageLayout {
   final bool isPageMode;
   final double a4Width;
@@ -9,8 +7,8 @@ class PageLayout {
   final double marginBottom;
   final double marginLeft;
   final double marginRight;
-  final List<double> pageBreaks;
-  final double logicalHeight;
+  final int totalPages;
+  final double physicalHeight;
 
   PageLayout({
     required this.isPageMode,
@@ -21,59 +19,7 @@ class PageLayout {
     required this.marginBottom,
     required this.marginLeft,
     required this.marginRight,
-    required this.pageBreaks,
-    required this.logicalHeight,
+    required this.totalPages,
+    required this.physicalHeight,
   });
-
-  int get totalPages => isPageMode ? pageBreaks.length : 1;
-
-  double get physicalHeight {
-    if (!isPageMode) return logicalHeight;
-    return (totalPages * a4Height) + ((totalPages - 1) * pageGap);
-  }
-
-  double physicalToLogicalY(double physicalY) {
-    if (!isPageMode) return physicalY - 32.0;
-
-    int pageIndex = (physicalY / (a4Height + pageGap)).floor();
-    if (pageIndex < 0) pageIndex = 0;
-    if (pageIndex >= pageBreaks.length) pageIndex = pageBreaks.length - 1;
-
-    double localY = physicalY - (pageIndex * (a4Height + pageGap));
-    double offsetInPrintable = localY - marginTop;
-
-    double maxContentOnPage =
-        ((pageIndex + 1 < pageBreaks.length)
-            ? pageBreaks[pageIndex + 1]
-            : logicalHeight) -
-        pageBreaks[pageIndex];
-
-    // Üst kenar boşluğuna tıklanırsa, sayfanın en başına sabitle
-    if (offsetInPrintable < 0) offsetInPrintable = 0;
-
-    // Alt kenar boşluğuna tıklanırsa, o sayfadaki en son satıra sabitle
-    if (offsetInPrintable > maxContentOnPage) {
-      offsetInPrintable = maxContentOnPage;
-    }
-
-    return pageBreaks[pageIndex] + offsetInPrintable;
-  }
-
-  // Sayfa modundaki fiziksel kaydırma mesafesini hesaplamak için (YENİ EKLENDİ)
-  double logicalToPhysicalY(double logicalY) {
-    if (!isPageMode) return logicalY;
-
-    int pageIndex = 0;
-    for (int i = 0; i < pageBreaks.length; i++) {
-      if (logicalY >= pageBreaks[i]) {
-        pageIndex = i;
-      } else {
-        break;
-      }
-    }
-
-    double pageTop = pageIndex * (a4Height + pageGap);
-    double offsetInPage = logicalY - pageBreaks[pageIndex];
-    return pageTop + marginTop + offsetInPage;
-  }
 }
