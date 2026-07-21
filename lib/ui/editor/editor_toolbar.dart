@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_colorpicker/flutter_colorpicker.dart';
+import 'package:mostromo_editor/ui/editor/color_picker_dialog.dart';
 import 'package:provider/provider.dart';
 import '../../core/app_theme.dart';
 import '../../providers/editor_provider.dart';
@@ -621,38 +621,24 @@ class EditorToolbar extends StatelessWidget {
     );
   }
 
-  // Renk Seçici Butonu (Eski kodundan uyarlandı)
+  // --- GÜNCEL: Metin Rengi Seçici Butonu ---
   Widget _buildColorPicker(BuildContext context, EditorProvider provider) {
     return InkWell(
       onTap: () {
-        Color pickerColor = provider.currentColor ?? Colors.white;
         showDialog(
           context: context,
-          builder: (context) => AlertDialog(
-            backgroundColor: MostromoTheme.surfaceColor,
-            title: const Text(
-              'Metin Rengi',
-              style: TextStyle(color: Colors.white),
-            ),
-            content: SingleChildScrollView(
-              child: BlockPicker(
-                pickerColor: pickerColor,
-                onColorChanged: (color) => pickerColor = color,
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('İptal'),
-              ),
-              ElevatedButton(
-                onPressed: () {
-                  provider.setTextColor(pickerColor);
-                  Navigator.pop(context);
-                },
-                child: const Text('Uygula'),
-              ),
-            ],
+          builder: (context) => MostromoColorPickerDialog(
+            title: 'Metin Rengi',
+            initialColor: provider.currentColor ?? Colors.white,
+            isBackground: false,
+            onColorApplied: (color) {
+              // Eğer temizle dendiyse varsayılan olarak beyaza (veya siyah) döndür
+              if (color == null) {
+                provider.setTextColor(Colors.white);
+              } else {
+                provider.setTextColor(color);
+              }
+            },
           ),
         );
       },
@@ -686,49 +672,23 @@ class EditorToolbar extends StatelessWidget {
         ),
       ),
     );
-  } // 🌟 YENİ: Fosforlu Kalem Seçici
+  }
 
+  // --- GÜNCEL: Fosforlu Kalem Seçici Butonu ---
   Widget _buildHighlightPicker(BuildContext context, EditorProvider provider) {
     return InkWell(
       onTap: () {
-        Color pickerColor = provider.currentBackgroundColor ?? Colors.yellow;
         showDialog(
           context: context,
-          builder: (context) => AlertDialog(
-            backgroundColor: MostromoTheme.surfaceColor,
-            title: const Text(
-              'Arka Plan Rengi',
-              style: TextStyle(color: Colors.white),
-            ),
-            content: SingleChildScrollView(
-              child: BlockPicker(
-                pickerColor: pickerColor,
-                onColorChanged: (color) => pickerColor = color,
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  provider.setHighlightColor(null); // Fosforu temizle
-                  Navigator.pop(context);
-                },
-                child: const Text(
-                  'Rengi Temizle',
-                  style: TextStyle(color: Colors.redAccent),
-                ),
-              ),
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('İptal'),
-              ),
-              ElevatedButton(
-                onPressed: () {
-                  provider.setHighlightColor(pickerColor);
-                  Navigator.pop(context);
-                },
-                child: const Text('Uygula'),
-              ),
-            ],
+          builder: (context) => MostromoColorPickerDialog(
+            title: 'Arka Plan Rengi',
+            initialColor: provider.currentBackgroundColor ?? Colors.yellow,
+            isBackground: true,
+            onColorApplied: (color) {
+              provider.setHighlightColor(
+                color,
+              ); // Null gelirse fosforu temizler
+            },
           ),
         );
       },
@@ -750,7 +710,7 @@ class EditorToolbar extends StatelessWidget {
           child: Row(
             children: [
               Icon(
-                Icons.border_color, // Fosforlu kalem ikonu
+                Icons.border_color,
                 size: 16,
                 color: provider.currentBackgroundColor ?? Colors.white70,
               ),

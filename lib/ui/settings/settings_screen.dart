@@ -15,6 +15,7 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   int _userId = 0;
+
   bool _isLoading = true;
 
   @override
@@ -27,6 +28,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final prefs = await SharedPreferences.getInstance();
     setState(() {
       _userId = prefs.getInt('user_id') ?? 0;
+
       _isLoading = false;
     });
   }
@@ -175,7 +177,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                             CrossAxisAlignment.start,
                                         children: [
                                           const Text(
-                                            "Mostromo Kullanıcısı",
+                                            "Kullanıcı Adı",
                                             style: TextStyle(
                                               color: Colors.white,
                                               fontSize: 18,
